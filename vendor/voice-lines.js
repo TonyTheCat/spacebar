@@ -26,7 +26,11 @@
 const LINES = {
   NOT_SET_UP: {
     id: 'not-set-up',
-    text: 'Page Tools is not set up yet. Ask your helper to enter the key in its settings.',
+    /* The product's name, which is Spacebar. It said "Page Tools" — the working name of the
+     * repository this table came out of — and that is the first thing a person hears, out
+     * loud, when the browser opens without a key: somebody else's product, introducing
+     * itself. */
+    text: 'Spacebar is not set up yet. Ask your helper to add the key in settings.',
     file: 'assets/voice/not-set-up.mp3',
   },
   CONNECTED: {
@@ -48,6 +52,18 @@ const LINES = {
     id: 'key-refused',
     text: 'The key was refused. Ask your helper to check it in the settings.',
     file: 'assets/voice/key-refused.mp3',
+  },
+  ALLOW_THE_MICROPHONE: {
+    /* Said while Chrome's own permission dialog is on screen, which is the one moment a
+     * blind person has no way of knowing there is anything to answer.
+     *
+     * It arrived as a bare string inside the phone, where it had no recording and no way to
+     * get one: a sentence that is not in this table falls back to the browser's own voice
+     * every time, and the browser's voice is the thing this table exists to avoid. The words
+     * are the phone's, verbatim, so nothing anybody hears changes by moving them here. */
+    id: 'allow-the-microphone',
+    text: 'Allow the microphone. Your browser is asking, at the top of the window.',
+    file: 'assets/voice/allow-the-microphone.mp3',
   },
   NO_MICROPHONE: {
     id: 'no-microphone',
