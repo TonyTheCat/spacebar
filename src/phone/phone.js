@@ -230,12 +230,25 @@ const onServerEvent = (message) => {
      * own voice is the sound of something being broken. The clip is the fallback for a line
      * that cannot be asked for at all. */
     void openTheStartPageIfNothingElseDid()
+      .catch((error) => {
+        /* A tool list is the one thing that must never be skipped.
+         *
+         * This used to be an unguarded chain: anything that threw while finding somewhere to
+         * start — a tab that vanished, a url the browser refuses — took the publish and the
+         * greeting down with it, silently, and the session sat there holding no tools while
+         * the person talked to it. Nothing about starting somewhere is worth that. */
+        log(`could not open a start page: ${String(error).slice(0, 160)}`);
+      })
       .then(() => readThePageAndPublish('the first set'))
       .then((scan) => {
         if (!theLine.isUp) return; // the line can go while we are getting here
         if (!askItToSay(Orientation.hello(scan?.title, scan?.url))) {
           sayOutLoud(VoiceLines.CONNECTED);
         }
+      })
+      .catch((error) => {
+        log(`the first publish went wrong: ${String(error).slice(0, 160)}`);
+        sayOutLoud(VoiceLines.CONNECTED);
       });
   }
 
@@ -679,9 +692,27 @@ const findPageTab = async (how = {}) => {
    * The person was on one page and the agent was holding another, which for somebody who
    * cannot see the screen is unfixable — they have no way to notice it happened. So the window
    * that actually has the screen is asked for by name, and only then the rest. */
+  /* A BLANK TAB IS NOT A PAGE. It is somewhere a page can be PUT, and the difference decides
+   * which of two tabs "this page" means.
+   *
+   * Measured on the film recorder, which opens the real page and leaves a blank tab beside it
+   * — the blank one being the last opened, and therefore the active one. Asked for the page,
+   * this function handed back the blank tab, every scan on it found nobody, and the session
+   * was never given the tools of the page the person was actually looking at. The take died
+   * waiting for a tool list that was never going to come.
+   *
+   * So the search runs twice: once over the tabs that have something on them, and only then
+   * over everything. Somebody sitting on a genuinely blank tab still gets it back. */
+  const real = theirs.filter((tab) => !KnownSites.isBlankPage(tab.url ?? tab.pendingUrl));
   const focused = await chrome.windows.getLastFocused().catch(() => null);
-  const here = theirs.find((tab) => tab.active && tab.windowId === focused?.id);
+  const here =
+    real.find((tab) => tab.active && tab.windowId === focused?.id) ??
+    theirs.find((tab) => tab.active && tab.windowId === focused?.id && real.length === 0);
   if (here) return here;
+
+  // Something on the screen in another window, before anything blank anywhere.
+  const elsewhere = real.find((tab) => tab.active) ?? real[0];
+  if (elsewhere) return elsewhere;
 
   // Nothing in the focused window is theirs — the phone may be pinned alone in it. Any active
   // page, then a blank one, which is somewhere a page can be put without taking away a page
@@ -846,6 +877,28 @@ const handToTheSession = async (tools, why) => {
 const startHere = StartHere.create();
 
 const openTheStartPageIfNothingElseDid = async () => {
+  /* "NOTHING ELSE DID" HAS TO MEAN THERE IS NO PAGE, not merely that a blank tab exists.
+   *
+   * StartHere.decide answers one question — is there a blank tab? — and that is not the same
+   * question. Measured on the film recorder, which opens a real page AND leaves a blank tab
+   * beside it: the blank one was picked, sent to the start page, and became pageTabId. Every
+   * scan after that asked the tab that was still navigating (to a host the recorder cannot
+   * resolve), found nobody, and published our four general tools. The page the person was
+   * actually on never reached the session at all — "tools now:" stayed empty for a full
+   * minute, and the take died waiting for it.
+   *
+   * So a real page wins. The fallback is for a browser that came up with nothing to work with,
+   * which is what it was written for; with a page already open there is nothing to fall back
+   * from. lastResort: false, because an arbitrary tab is not "a page they are on" either. */
+  const alreadySomewhere = await findPageTab({ lastResort: false });
+  // url ?? pendingUrl, the same pair findPageTab uses: a tab still restoring a real page has
+  // an empty url and carries where it is going in pendingUrl. Read by url alone, somebody's
+  // page mid-restore looks blank and gets sent to the start page instead of left alone.
+  if (alreadySomewhere && !KnownSites.isBlankPage(alreadySomewhere.url ?? alreadySomewhere.pendingUrl)) {
+    pageTabId = alreadySomewhere.id ?? pageTabId;
+    return;
+  }
+
   const tabs = await chrome.tabs.query({});
   const ours = chrome.runtime.getURL('');
   const blank = startHere.decide(tabs.filter((tab) => !String(tab.url ?? tab.pendingUrl ?? '').startsWith(ours)));
@@ -1450,8 +1503,24 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
   // A different tab in front of the page holding the key is a real loss — and the one case
   // the person causes themselves. Unless we caused it, which closeTheHeldTurn knows about.
   if (HoldingTheKey.tabCameForward(holding, tabId)) closeTheHeldTurn('lost-sight');
-  pageTabId = tabId;
-  republish();
+
+  /* Follow a tab only once there is something on it.
+   *
+   * This adopted every tab that came forward, blank ones included, and a followed tab wins
+   * every later question about "this page". Measured on the film recorder: it opens the real
+   * page and then a blank tab, the blank one comes forward last, and from that moment the
+   * phone was following a page with nothing on it. Every scan asked it, found nobody, and the
+   * session was never handed the tools of the page the person was actually on — a take died
+   * waiting a full minute for a tool list that could not arrive.
+   *
+   * A blank tab is somewhere a page can be PUT, which is what open_site uses it for — and
+   * open_site sets this itself when it puts one there. Coming forward empty is not the same
+   * thing and must not quietly become the page we are working on. */
+  void chrome.tabs.get(tabId).then((tab) => {
+    if (KnownSites.isBlankPage(tab?.url ?? tab?.pendingUrl)) return;
+    pageTabId = tabId;
+    republish();
+  }).catch(() => {});
 });
 
 byId('connect').addEventListener('click', () => void connect());
