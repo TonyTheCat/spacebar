@@ -549,7 +549,28 @@ let heldBySession = null;
 const schemasInPlay = new Map();
 
 /** An action that has been asked about and is waiting for a real answer. */
-let parked = /** @type {{name: string, args: object, at: number}|null} */ (null);
+let parked = /** @type {{name: string, args: object, at: number, schema?: object}|null} */ (null);
+
+/** The ONE press a person has just agreed to.
+ *
+ * The page asks the extension to confirm before it runs anything gated — its own gate, and not
+ * a duplicate of ours: ours stops the model pressing without asking, its one stops the PAGE
+ * pressing on its own behalf, and a gate that trusts whoever is calling it is not a gate. It
+ * has to be answered, and an unanswered request is read as no, which is the safe direction and
+ * exactly what went wrong: the phone listened for the talk key and nothing else, so every
+ * confirmed press came back "the human declined to press Search" — said to the person who had
+ * just said yes.
+ *
+ * So this is a token for one press: set when their own words confirmed it, spent by the first
+ * matching question, and gone. Anything else — a second ask for the same tool, a press
+ * nobody agreed to, a page trying its luck — is answered no, because it is.
+ *
+ * @type {{name: string, at: number}|null} */
+let pressToken = null;
+
+/** How long a confirmed press stays confirmable. Long enough for the round trip to the page,
+ *  short enough that a yes cannot be spent on something that happens later. */
+const PRESS_TOKEN_MS = 15000;
 
 /** How long a parked action stays answerable. A question nobody answered must die rather than
  *  be answered late: a yes said ninety seconds after the fact is a yes to something else. */
@@ -1089,7 +1110,13 @@ const pressWhatWasParked = async () => {
   const doIt = parked;
   parked = null;
   log(`confirmed by their own words — pressing ${doIt.name}`);
-  return runOnThePage(doIt.name, doIt.args, undefined);
+  // The page will ask the extension to confirm this press before it runs it. This is the one
+  // press that may be answered yes, and it is answered yes exactly once.
+  pressToken = { name: doIt.name, at: Date.now() };
+  const pressed = await runOnThePage(doIt.name, doIt.args, undefined);
+  // Whatever happened, the token does not outlive the press it was minted for.
+  pressToken = null;
+  return pressed;
 };
 
 /** Answer one tool call. Every path answers, whatever happens inside it: a call that never
@@ -1212,6 +1239,27 @@ chrome.runtime.onMessage.addListener((message, sender) => {
 
   if (message?.type === PT.TALK_STOP) {
     closeTheHeldTurn(message.why ?? 'released');
+    return false;
+  }
+
+  if (message?.type === PT.CONFIRM_REQUEST) {
+    /* Yes for exactly the press a person agreed to, and no for everything else.
+     *
+     * Answered synchronously — sendResponse after this listener has returned reaches nobody,
+     * and a confirmation that arrives too late is a confirmation that never came. */
+    const mine =
+      message.askedBy === 'phone' &&
+      pressToken !== null &&
+      Date.now() - pressToken.at < PRESS_TOKEN_MS;
+    if (mine) {
+      log(`confirming the press of "${message.label}" — they said yes to this one`);
+      // Spent. One yes is one press: a token left lying around would confirm the next thing
+      // the page asks about, which nobody agreed to.
+      pressToken = null;
+    } else {
+      log(`refusing to confirm "${message.label}" — nobody agreed to that`);
+    }
+    sendResponse({ ok: mine });
     return false;
   }
 
