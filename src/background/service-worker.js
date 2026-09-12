@@ -6,6 +6,11 @@
  * starts and Chrome shows an extension with no background at all — which is why everything
  * below that waits for something lives inside a function.
  */
+/* Absolute from the extension root, not relative to this file. importScripts resolves
+ * against the WORKER'S location — src/background/ — so a relative path here would have to
+ * climb out of a directory, and it would have to be re-checked every time this file moved.
+ * The manifest's own paths are root-relative for the same reason; the leading slash is what
+ * says "root" to importScripts. */
 importScripts('/src/shared/protocol.js');
 
 /** How long ONE ask may hang before we call it nothing. */
@@ -66,6 +71,40 @@ const scanTab = async (tabId) => {
   await chrome.storage.local.set({ [PT.LAST_SCAN_KEY]: scan });
   return scan;
 };
+
+/* The phone opens itself, and there is only ever one.
+ *
+ * The person this is built for should not have to find a tab, remember a chord, or know that
+ * an extension exists. The browser starts and the line is already there. It is opened PINNED,
+ * so it keeps its place at the left of the strip all day and is not mistaken for a page, and
+ * it is opened in the background so it does not take the screen away from wherever they were.
+ *
+ * BOTH events, and the second is not redundant. Under --load-extension, onStartup never fires
+ * at all: every launch is treated as a fresh install, so only onInstalled runs. The honest
+ * consequence is that a bench started that way will show this tab appearing and will be
+ * showing it for the wrong reason — the real startup path is only exercised by Load unpacked
+ * into a profile that survives a restart.
+ */
+const PHONE = 'src/phone/index.html';
+
+const openThePhone = async () => {
+  const url = chrome.runtime.getURL(PHONE);
+
+  /* One phone, however the browser came back.
+   *
+   * Chrome restores the last session, so yesterday's phone can already be on screen when this
+   * runs — and a second one means a second microphone held against the same person. Asking
+   * tabs.query({ url }) is not enough: a tab still being restored has not committed its url
+   * and carries it in pendingUrl instead, so the query misses it and opens a duplicate at
+   * exactly the moment a session is being restored, which is every launch. Both are checked.
+   */
+  const tabs = await chrome.tabs.query({});
+  if (tabs.some((tab) => tab.url === url || tab.pendingUrl === url)) return;
+  await chrome.tabs.create({ url, pinned: true, active: false });
+};
+
+chrome.runtime.onStartup.addListener(() => void openThePhone());
+chrome.runtime.onInstalled.addListener(() => void openThePhone());
 
 chrome.tabs.onUpdated.addListener((tabId, info) => {
   if (info.status === 'complete') void scanTab(tabId);

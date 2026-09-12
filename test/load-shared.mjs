@@ -49,7 +49,13 @@ const sourceOf = (file) => readFileSync(join(here, '..', 'src', 'shared', file),
  * Node carries a good deal of the web platform now — WebSocket, Response, Event, performance —
  * and those are exactly the names a phone module must not be able to find by accident: in the
  * browser they behave differently or are not there at all, and a test that silently borrows
- * Node's is a test that proves nothing about the extension. */
+ * Node's is a test that proves nothing about the extension.
+ *
+ * What it leans on, said out loud: every module in src/shared declares its global with a
+ * top-level `const`, never `var` or a function declaration. A `var` would go to the enclosing
+ * function scope rather than the block inside the `with`, and `return Gating` would then ask
+ * the scope object for it and be told nobody listed it. That fails LOUDLY, with the name in
+ * the message, which is why it is a note rather than a guard. */
 const LANGUAGE = new Set([
   'Array', 'ArrayBuffer', 'BigInt', 'Boolean', 'DataView', 'Date', 'Error', 'EvalError',
   'FinalizationRegistry', 'Function', 'Infinity', 'Intl', 'JSON', 'Map', 'Math', 'NaN',
