@@ -494,6 +494,11 @@ const ACCEPTED_MS = 4000;
 const PAGE_LOAD_MS = 8000;
 /** One ask of the content script. */
 const ONE_ROUND_TRIP_MS = 4000;
+/** How long a press may take before we stop waiting for its answer. Longer than a round trip:
+ *  the content script waits for the control to take the value and for the page to react. */
+const PRESS_MS = 8000;
+/** How long to watch for the page to move after a press, before deciding it did not. */
+const MOVED_MS = 2500;
 
 /** Ask something and give up rather than hang. A tool call that never answers leaves the model
  *  waiting and the person in silence, which is worse than a refusal.
@@ -836,15 +841,23 @@ const readThePage = async () => {
 const fillOneField = async (args) => {
   const tab = await findPageTab();
   if (!tab || tab.id === undefined) return { ok: false, text: VoiceLines.NO_PAGE.text };
-  const result = await orNothing(
-    chrome.tabs.sendMessage(tab.id, {
-      type: PT.FILL_REQUEST,
-      tool: args?.tool,
-      field: args?.field,
-      value: args?.value,
-    }),
-    'fill_in'
-  );
+  let result = null;
+  try {
+    result = await Promise.race([
+      chrome.tabs.sendMessage(tab.id, {
+        type: PT.FILL_REQUEST,
+        tool: args?.tool,
+        field: args?.field,
+        value: args?.value,
+      }),
+      new Promise((done) => setTimeout(() => done(null), PRESS_MS)),
+    ]);
+  } catch (error) {
+    // Filling a box does not navigate, so a rejection here is the page being gone, not a
+    // press that worked. Said as that rather than as a timeout nobody can act on.
+    log(`fill_in: the page did not take it — ${String(error?.message ?? error).slice(0, 160)}`);
+    return { ok: false, text: 'That page is not there any more. Say so and read the page again.' };
+  }
   if (!result) return ToolResult.timedOut('fill_in');
   return ToolResult.capped(result);
 };
@@ -868,21 +881,53 @@ const runOnThePage = async (name, args, tool) => {
   }
 
   const was = await chrome.tabs.get(tab.id).catch(() => null);
-  const result = await orNothing(
-    chrome.tabs.sendMessage(tab.id, { type: PT.EXECUTE_REQUEST, name, args, askedBy: 'phone' }),
-    name,
-    PAGE_LOAD_MS
-  );
-  if (!result) return ToolResult.timedOut(name);
+  const wasAt = String(was?.url ?? '');
 
-  // The action may have taken them somewhere. Let it settle, then publish what is there now —
-  // BEFORE the model is answered, or its next response is built against the page it has left.
-  const now = await chrome.tabs.get(tab.id).catch(() => null);
-  if (now && was && now.url !== was.url) {
-    await waitForThePage(tab.id, String(was.url ?? ''));
+  /* Sent ONCE and never retried, and the failure is read rather than assumed.
+   *
+   * A press that navigates kills its own message port — Chrome answers with "the page keeping
+   * the extension port is moved into back/forward cache, so the message channel is closed",
+   * in thirteen milliseconds. Treated as a timeout, that becomes "it took too long and I do
+   * not know whether it went through" about an action that plainly DID go through, said to
+   * somebody who cannot look at the screen to check. A rejection is not a timeout, and the
+   * page itself says which of the two happened: if it moved, the press landed. */
+  let result = null;
+  let refused = '';
+  try {
+    result = await Promise.race([
+      chrome.tabs.sendMessage(tab.id, { type: PT.EXECUTE_REQUEST, name, args, askedBy: 'phone' }),
+      new Promise((done) => setTimeout(() => done('timed out'), PRESS_MS)),
+    ]);
+  } catch (error) {
+    refused = String(error?.message ?? error).slice(0, 200);
   }
+
+  // Whatever happened, let the page settle and publish what is there NOW — before the model is
+  // answered, or its next response is built against the page it has already left.
+  const moved = await waitForThePage(tab.id, wasAt, MOVED_MS);
+  const now = await chrome.tabs.get(tab.id).catch(() => null);
+  const wentSomewhere = Boolean(now && wasAt && now.url && now.url !== wasAt);
   await readThePageAndPublish('after an action');
-  return ToolResult.capped(result);
+
+  if (result && result !== 'timed out') return ToolResult.capped(result);
+
+  if (wentSomewhere || moved === 'settled') {
+    /* The port died because the page went away, which is the press working. Said as DONE, with
+     * where they are now and an instruction not to do it again: a model told "I do not know"
+     * about something that happened will helpfully try it a second time. */
+    log(`${name}: the port closed because the page moved — it went through`);
+    return {
+      ok: true,
+      text: `${AfterTheAction.wentThrough(name, Consent.written(args, schemasInPlay.get(name)))} ${Orientation.arrived(now?.title, now?.url)}`,
+    };
+  }
+
+  if (refused) {
+    // It did not move and the page refused the message. Said as what it is, not as a timeout.
+    log(`${name}: the page did not take it — ${refused}`);
+    return { ok: false, text: `The page did not take that. Tell them plainly that it did not happen.` };
+  }
+  return ToolResult.timedOut(name);
 };
 
 /** Press what was parked, if their own words say yes. */
