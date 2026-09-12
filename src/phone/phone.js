@@ -656,14 +656,29 @@ const findPageTab = async () => {
   const tabs = await chrome.tabs.query({});
   const ours = chrome.runtime.getURL('');
   const theirs = tabs.filter((tab) => !String(tab.url ?? tab.pendingUrl ?? '').startsWith(ours));
+
+  // The tab we are already following wins everything. It is the one open_site navigated, or
+  // the one they were last on, and following it is what makes "this page" mean one page.
   if (pageTabId !== null) {
     const known = theirs.find((tab) => tab.id === pageTabId);
     if (known) return known;
   }
-  // Whatever they are looking at, and a blank tab in preference to nothing: a blank one is
-  // where a page can be put without taking away somewhere they were.
-  const active = theirs.find((tab) => tab.active);
-  return active ?? KnownSites.pickBlankTab(theirs) ?? theirs[0] ?? null;
+
+  /* `active` is true for the active tab of EVERY window, not just theirs.
+   *
+   * From a live run with four pages open across windows: asked for "this page", the phone
+   * picked the active tab of a window nobody was looking at and published that site's tools.
+   * The person was on one page and the agent was holding another, which for somebody who
+   * cannot see the screen is unfixable — they have no way to notice it happened. So the window
+   * that actually has the screen is asked for by name, and only then the rest. */
+  const focused = await chrome.windows.getLastFocused().catch(() => null);
+  const here = theirs.find((tab) => tab.active && tab.windowId === focused?.id);
+  if (here) return here;
+
+  // Nothing in the focused window is theirs — the phone may be pinned alone in it. Any active
+  // page, then a blank one, which is somewhere a page can be put without taking away a page
+  // they were reading.
+  return theirs.find((tab) => tab.active) ?? KnownSites.pickBlankTab(theirs) ?? theirs[0] ?? null;
 };
 
 /** A page tool, as the model is shown it. The live element stays in the content script's own
@@ -836,6 +851,11 @@ const openTheStartPageIfNothingElseDid = async () => {
 
 /** Scan whatever page the person is on and publish what it offers.
  *  @param {string} why @returns {Promise<object|null>} the scan */
+/** The page we already know does not answer, so it is not polled again for four seconds every
+ *  time anything on the tab changes. Cleared when the url changes: a different page is a
+ *  different question. @type {string|null} */
+let couldNotRead = null;
+
 const readThePageAndPublish = async (why) => {
   const tab = await findPageTab();
 
@@ -858,7 +878,27 @@ const readThePageAndPublish = async (why) => {
     return null;
   }
   pageTabId = tab.id;
-  const scan = await askUntilItAnswers(tab.id, { type: PT.SCAN_REQUEST }, 'the scan');
+
+  /* ASKED ONCE if we have already failed on this exact page.
+   *
+   * From a live run: the person opened a domain with no content script in it, and every tab
+   * event started another four-second poll — "nobody answered after 17 asks", again and again,
+   * while nothing else could get a word in. The phone stopped answering the person entirely.
+   * It was not stuck; it was busy asking a door that was never going to open.
+   *
+   * A page that did not answer a moment ago will not answer because we asked harder. So the
+   * first failure is remembered against its url, the next ask is a single try, and the memory
+   * is cleared the moment the url changes — a different page is a different question. */
+  const at = String(tab.url ?? tab.pendingUrl ?? '');
+  if (couldNotRead && couldNotRead !== at) couldNotRead = null;
+  const askOnce = couldNotRead === at;
+
+  const scan = askOnce
+    ? await chrome.tabs.sendMessage(tab.id, { type: PT.SCAN_REQUEST }).catch(() => null)
+    : await askUntilItAnswers(tab.id, { type: PT.SCAN_REQUEST }, 'the scan');
+  if (!scan || typeof scan !== 'object') {
+    couldNotRead = at;
+  }
   if (!scan || typeof scan !== 'object') {
     /* Could not look. NOT "the page has none" — said apart, the agent reports it lost the page;
      * run together it tells somebody who cannot see that the thing they asked for is not
@@ -875,6 +915,7 @@ const readThePageAndPublish = async (why) => {
     await handToTheSession([...OUR_TOOLS], `${why}, unreadable page`);
     return scan;
   }
+  couldNotRead = null;
   await handToTheSession(toolsOf(scan), why);
   return scan;
 };
