@@ -87,7 +87,11 @@ const scanTab = async (tabId) => {
  */
 const PHONE = 'src/phone/index.html';
 
-const openThePhone = async () => {
+/**
+ * @param {{ reviveStale: boolean }} how
+ *   reviveStale: is an existing phone tab to be TRUSTED, or reloaded?
+ */
+const openThePhone = async ({ reviveStale }) => {
   const url = chrome.runtime.getURL(PHONE);
 
   /* One phone, however the browser came back.
@@ -97,14 +101,38 @@ const openThePhone = async () => {
    * tabs.query({ url }) is not enough: a tab still being restored has not committed its url
    * and carries it in pendingUrl instead, so the query misses it and opens a duplicate at
    * exactly the moment a session is being restored, which is every launch. Both are checked.
+   *
+   * The url is compared WHOLE, extension id and all, rather than by its path. Another
+   * extension's phone — last night's build, still in the profile — carries the same path under
+   * a different id, and counting that as ours means never opening one of our own.
    */
   const tabs = await chrome.tabs.query({});
-  if (tabs.some((tab) => tab.url === url || tab.pendingUrl === url)) return;
-  await chrome.tabs.create({ url, pinned: true, active: false });
+  const already = tabs.find((tab) => tab.url === url || tab.pendingUrl === url);
+
+  if (!already) {
+    await chrome.tabs.create({ url, pinned: true, active: false });
+    return;
+  }
+
+  /* A tab at our own address is not the same thing as a phone that works.
+   *
+   * An unpacked extension keeps its id across a reload — the id comes from the folder — so
+   * after Load unpacked → Reload, the OLD tab is still there with exactly our url, and it is
+   * dead: its scripts belong to an extension context that no longer exists. Trusted, it means
+   * the service worker starts, finds "a phone", opens nothing, and the browser sits there with
+   * a broken page pinned and no voice at all. Measured on a real restart, not imagined.
+   *
+   * So on an install, an update or a reload, an existing tab is REVIVED rather than believed.
+   * On a browser start it is left alone: a restored tab loads its scripts fresh against the
+   * extension that is starting with it, and reloading it would throw away a session that is
+   * coming up anyway.
+   */
+  if (!reviveStale || already.id === undefined) return;
+  await chrome.tabs.reload(already.id).catch(() => chrome.tabs.create({ url, pinned: true, active: false }));
 };
 
-chrome.runtime.onStartup.addListener(() => void openThePhone());
-chrome.runtime.onInstalled.addListener(() => void openThePhone());
+chrome.runtime.onStartup.addListener(() => void openThePhone({ reviveStale: false }));
+chrome.runtime.onInstalled.addListener(() => void openThePhone({ reviveStale: true }));
 
 chrome.tabs.onUpdated.addListener((tabId, info) => {
   if (info.status === 'complete') void scanTab(tabId);

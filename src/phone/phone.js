@@ -168,9 +168,12 @@ const turn = Turns.create({
  * sound the session has already sent, and cancelling without clearing leaves the model talking
  * after it has stopped.
  */
+let answerWasCutOff = false;
+
 const askForAnAnswer = () => {
   if (turn.answering) {
     log('they talked over the answer — cancelling it');
+    answerWasCutOff = true;
     send({ type: 'response.cancel' });
     send({ type: 'output_audio_buffer.clear' });
     // And ask once the session says that answer has actually stopped. Asking straight after
@@ -179,8 +182,31 @@ const askForAnAnswer = () => {
     turn.askWhenTheAnswerStops();
     return;
   }
+
+  /* Before it answers, the model is told the last answer did not arrive whole.
+   *
+   * Its own record says it told them everything it produced — including the words we threw
+   * away at the speaker when they interrupted. Without this it never mentions those again, and
+   * the person is left with half a list and no way to know there was more. */
+  if (answerWasCutOff) {
+    answerWasCutOff = false;
+    log('the last answer was cut off — telling it they heard only the beginning');
+    send({
+      type: 'conversation.item.create',
+      item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: CUT_OFF_NOTE }] },
+    });
+  }
   send({ type: 'response.create' });
 };
+
+/** Ask the session to say one line, now.
+ *
+ * Per-response instructions, so it cannot be mistaken for a change to how the whole
+ * conversation behaves. The only place that creates a response for a sentence of OURS rather
+ * than for a turn the person took.
+ *
+ * @param {string} instructions @returns {boolean} */
+const askItToSay = (instructions) => send({ type: 'response.create', response: { instructions } });
 
 /** @param {MessageEvent} message */
 const onServerEvent = (message) => {
@@ -194,10 +220,23 @@ const onServerEvent = (message) => {
     // A line that came up may drop, and one automatic attempt is allowed again.
     mayReconnect = true;
     theLine.live();
-    sayOutLoud(VoiceLines.CONNECTED);
-    // Somewhere real to be, and then the first list — so the model has something to act with
-    // before it is asked anything, rather than a blank tab and no tools at all.
-    void openTheStartPageIfNothingElseDid().then(() => readThePageAndPublish('the first set'));
+    /* Somewhere real to be, then the first list, then hello — in that order, and the order is
+     * the point. The greeting names where they are, so it cannot be said before there is a
+     * page; and the tools have to be in the session's hands before the model is asked for
+     * anything at all, or its first response is built against nothing.
+     *
+     * THE SESSION SAYS IT, not the phone. The recorded lines are for when the session is what
+     * has gone wrong — using one here would put a second voice into an errand, and the phone's
+     * own voice is the sound of something being broken. The clip is the fallback for a line
+     * that cannot be asked for at all. */
+    void openTheStartPageIfNothingElseDid()
+      .then(() => readThePageAndPublish('the first set'))
+      .then((scan) => {
+        if (!theLine.isUp) return; // the line can go while we are getting here
+        if (!askItToSay(Orientation.hello(scan?.title, scan?.url))) {
+          sayOutLoud(VoiceLines.CONNECTED);
+        }
+      });
   }
 
   if (event.type === 'session.updated') {
@@ -279,6 +318,7 @@ const onServerEvent = (message) => {
 const comeBack = async (said) => {
   if (!theLine.down()) return; // somebody else already noticed; one reconnection, not three
   turn.clear();
+  answerWasCutOff = false;
   talkKeyOnPhone.lostSight();
   if (microphone) microphone.enabled = false;
   peer?.close();
@@ -322,8 +362,15 @@ const connect = async () => {
  *  running at a time.
  *  @returns {Promise<boolean>} true if the connection was established. */
 const openTheLine = async () => {
-  // A new line is a new hello: whatever turn the last one was in the middle of went with it.
+  /* A new line is a new hello: whatever turn the last one was in the middle of went with it.
+   *
+   * Including the fact that an answer was cut off. That flag is consumed by the next ask, and
+   * if the line drops inside the cancel window the ask never comes — so it would survive the
+   * reconnection and tell a fresh session that its previous answer was interrupted. It was not:
+   * that session did not exist yet. Found by the reviewer, and it is exactly the shape of thing
+   * that produces one baffling turn nobody can reproduce. */
   turn.clear();
+  answerWasCutOff = false;
 
   /* The key comes from the settings page, never from here. It used to be a password field on
    * this surface — the one screen a blind person uses every day, asking them to type a secret
@@ -376,6 +423,16 @@ const openTheLine = async () => {
   /* The microphone is opened once and kept, and its track starts DISABLED. Push to talk IS
    * that flag: permission is granted once, and nothing is heard until the key is held. A
    * microphone that is open because it was easier is the thing this product must not be. */
+  /* Said BEFORE the ask, out loud, because the thing they have to do next is invisible to them.
+   *
+   * Chrome puts a permission bubble at the top of the window. Somebody who cannot see it gets
+   * silence from a phone that says "short-lived key minted" and then nothing at all, while the
+   * browser waits for a click on something they do not know is there. One sentence, from the
+   * phone's own voice — this is exactly the kind of moment the recorded lines exist for, and
+   * the session cannot say it because the session is not up yet. */
+  state('waiting for the microphone — allow it in the browser');
+  sayOutLoud('Allow the microphone. Your browser is asking, at the top of the window.');
+
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true }).catch((error) => {
     // Silence from here would be indistinguishable from an agent with nothing to say — and
     // this is the one failure where the person is about to hold a key and talk into a
@@ -713,20 +770,41 @@ const openTheStartPageIfNothingElseDid = async () => {
  *  @param {string} why @returns {Promise<object|null>} the scan */
 const readThePageAndPublish = async (why) => {
   const tab = await findPageTab();
+
+  /* OUR OWN TOOLS GO OUT EVEN WHEN THE PAGE CANNOT BE READ, and this is the most important
+   * line in the function.
+   *
+   * From a live run: the browser came back with restored tabs, none of them blank. A tab that
+   * existed BEFORE the extension loaded has no content script in it — Chrome does not inject
+   * into tabs already open — so the scan went unanswered, nothing was published, and the
+   * session was handed a list of no tools at all. The model, with no way to do anything and no
+   * way to say why, announced that it had searched for pizza and was looking at the results.
+   * That is a lie told to somebody who cannot check it, and it starts here: a model holding
+   * nothing will narrate rather than refuse.
+   *
+   * open_site always works — it is ours, it needs no content script — so it always goes out.
+   * A person who cannot read this page can still be taken somewhere that reads. */
   if (!tab || tab.id === undefined) {
-    log('there is no page open to read');
+    log('there is no page open to read — publishing our own tools so there is still a way out');
+    await handToTheSession([...OUR_TOOLS], `${why}, with no page`);
     return null;
   }
   pageTabId = tab.id;
   const scan = await askUntilItAnswers(tab.id, { type: PT.SCAN_REQUEST }, 'the scan');
   if (!scan || typeof scan !== 'object') {
-    // Could not look. NOT "the page has none" — said apart, the agent reports it lost the page;
-    // run together it tells somebody who cannot see that the thing they asked for is not there.
-    log('the page did not answer a scan');
+    /* Could not look. NOT "the page has none" — said apart, the agent reports it lost the page;
+     * run together it tells somebody who cannot see that the thing they asked for is not
+     * there. The commonest cause is a tab older than the extension, and the way out of that is
+     * to go somewhere else, which is exactly what open_site is for. */
+    log('the page did not answer a scan — publishing our own tools so there is still a way out');
+    schemasInPlay.clear();
+    await handToTheSession([...OUR_TOOLS], `${why}, unreadable page`);
     return null;
   }
   if (scan.readable === false) {
     log(`could not read that page: ${scan.error ?? 'no reason given'}`);
+    schemasInPlay.clear();
+    await handToTheSession([...OUR_TOOLS], `${why}, unreadable page`);
     return scan;
   }
   await handToTheSession(toolsOf(scan), why);
