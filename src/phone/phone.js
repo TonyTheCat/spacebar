@@ -1235,7 +1235,19 @@ const closeTheHeldTurn = (why) => {
   }
 };
 
-chrome.runtime.onMessage.addListener((message, sender) => {
+/* sendResponse is the THIRD argument, and taking only two of them is how the gate said nobody
+ * had answered while this very listener was logging that it had.
+ *
+ * From a live run: the person said yes, the phone minted the press token, the page asked to
+ * confirm, this listener printed "confirming the press of Search — they said yes to this one"
+ * — and then threw ReferenceError on the next line, because sendResponse was never a name in
+ * this function. Nothing went back, the page read the silence as nobody listening (which is
+ * correct and is the safe direction), and the form sat there filled in and unsent while the
+ * product told somebody who had just agreed that it could not press for them.
+ *
+ * `node --check` cannot catch it: the file parses perfectly. It was found by reading the
+ * listener against a log that said two contradictory things one second apart. */
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === PT.TALK_START) {
     holding = sender.tab?.id ?? null;
     holdingWindow = sender.tab?.windowId ?? null;
@@ -1260,15 +1272,24 @@ chrome.runtime.onMessage.addListener((message, sender) => {
       message.askedBy === 'phone' &&
       pressToken !== null &&
       Date.now() - pressToken.at < PRESS_TOKEN_MS;
-    if (mine) {
-      log(`confirming the press of "${message.label}" — they said yes to this one`);
-      // Spent. One yes is one press: a token left lying around would confirm the next thing
-      // the page asks about, which nobody agreed to.
-      pressToken = null;
-    } else {
-      log(`refusing to confirm "${message.label}" — nobody agreed to that`);
+    if (!mine) {
+      /* NOT OURS, so this phone says NOTHING — it does not answer "no".
+       *
+       * Measured with two phone tabs open, which a helper can make by duplicating the tab: the
+       * one WITHOUT the token answered first, the page took that as the answer, and a person
+       * who had just said yes out loud was told "the human declined to press Save note". A
+       * missing answer is already a refusal at the far end, and it is the HONEST one — nothing
+       * is pressed either way, and only one of the two sentences puts words in their mouth.
+       *
+       * So silence here, and the phone that actually holds the yes answers. */
+      log(`not ours to confirm: "${message.label}" — leaving it unanswered`);
+      return false;
     }
-    sendResponse({ ok: mine });
+    log(`confirming the press of "${message.label}" — they said yes to this one`);
+    // Spent. One yes is one press: a token left lying around would confirm the next thing the
+    // page asks about, which nobody agreed to.
+    pressToken = null;
+    sendResponse({ ok: true });
     return false;
   }
 
