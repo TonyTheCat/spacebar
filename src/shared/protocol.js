@@ -205,6 +205,22 @@ const PT = {
   /** phone -> ISOLATED -> MAIN: run one of the tools the SITE declared, and the answer back.
    *  It cannot go the way a synthesized tool goes: the page's own function is reachable only
    *  from the page's own world. */
+  /* WHAT THE ENVELOPE LOOKS LIKE, written down because leaving it unsaid cost a round trip.
+   *
+   * Every message across the two worlds carries `channel`, `type` and the `askId` it answers,
+   * and its payload under ONE NAMED KEY rather than spread across the envelope:
+   *
+   *   { channel, type: DECLARED_RESULT,         askId, declared: DeclaredReport }
+   *   { channel, type: DECLARED_EXECUTE_RESULT, askId, result: ExecResult }
+   *
+   * One key, not four fields flattened into the message. The typedefs below describe objects,
+   * and an object that arrives in pieces is a different thing that happens to have the same
+   * field names — which is exactly how two halves written from the same typedef disagreed: one
+   * end sent `declared`, the other read `available` off the envelope and concluded the browser
+   * had no WebMCP at all, with a live modelContext sitting right there.
+   *
+   * And ONE copy of it. A payload sent both nested and flattened "so either reader works" is
+   * two contracts, and the day one of them changes is the day they stop agreeing silently. */
   DECLARED_EXECUTE_REQUEST: 'declared-execute-request',
   DECLARED_EXECUTE_RESULT: 'declared-execute-result',
 
