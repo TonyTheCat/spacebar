@@ -143,7 +143,42 @@ const out = await page.evaluate(async () => {
   };
 });
 
-console.log(JSON.stringify(out, null, 1));
+/* And the PHONE half: does what the site declared actually reach the session, under the site's
+ * own names, and does the gate insist on asking about it? The wire working is not the same as
+ * the phone calling it — that gap is exactly what a reviewer found after the page side landed. */
+const phone = ctx.pages().find((p) => p.url().includes('/src/phone/'));
+const fromThePhone = phone
+  ? await phone.evaluate(async (fixture) => {
+      const tabs = await chrome.tabs.query({});
+      const target = tabs.find((t) => t.url === fixture || t.url?.startsWith(fixture));
+      if (!target) return { error: 'the fixture tab was not found from the phone' };
+      pageTabId = target.id;
+      const scan = await chrome.tabs.sendMessage(target.id, { type: PT.SCAN_REQUEST });
+      const offered = toolsOf(scan);
+      const declaredTool = (scan?.declared?.tools ?? []).find((t) => t.name === 'delete_all_notes');
+      return {
+        scanCarriesDeclared: Array.isArray(scan?.declared?.tools) ? scan.declared.tools.length : null,
+        offeredNames: offered.map((t) => t.name),
+        // every declared tool must be gated, whatever it claims about itself
+        gatedByTheRule: (scan?.declared?.tools ?? []).map((t) => Gating.mustAskOutLoud(t)),
+        // and calling one must PARK rather than run
+        parkedAnswer: declaredTool
+          ? await runOnThePage('delete_all_notes', { sure: 'yes' }, declaredTool)
+          : null,
+        /* AND THEN THE PRESS. The gate always intercepts a declared tool, so without this the
+         * confirmed round trip — the one that actually carries source 'declared' to the page's
+         * own world — is never exercised at all, and the reviewer was right to say so. Their
+         * own words say yes, and the page's own function must run. */
+        pressedAfterYes: await (async () => {
+          lastHeardFromPerson = 'yes please';
+          heardAt = Date.now();
+          return pressWhatWasParked();
+        })(),
+      };
+    }, FIXTURE)
+  : { error: 'no phone tab' };
+const pageAfter = await page.evaluate(() => document.getElementById('said').textContent);
+console.log(JSON.stringify({ ...out, fromThePhone, pageAfterTheAsk: pageAfter }, null, 1));
 
 const problems = [];
 if (out.available !== true) problems.push('the browser reported no WebMCP at all');
@@ -154,6 +189,14 @@ if (!out.schemaProperties.some((keys) => keys.includes('sure'))) problems.push('
 if (out.ran?.ok !== true || !/there are 2 notes/.test(out.ran?.text ?? '')) problems.push(`running a declared tool did not reach the page: ${out.ran?.text}`);
 if (out.pageSays !== 'counted') problems.push(`the page itself did not run it: ${out.pageSays}`);
 if (out.missing?.ok !== false) problems.push('a tool the page does not offer must be refused, not guessed at');
+if (fromThePhone?.scanCarriesDeclared !== 2) problems.push(`the scan did not carry the declaration to the phone: ${fromThePhone?.error ?? fromThePhone?.scanCarriesDeclared}`);
+if (!(fromThePhone?.offeredNames ?? []).includes('delete_all_notes')) problems.push(`the phone did not offer the site's own tools: ${(fromThePhone?.offeredNames ?? []).join(', ')}`);
+if ((fromThePhone?.gatedByTheRule ?? []).some((gated) => gated !== true)) problems.push('a declared tool was not treated as must-ask');
+if (fromThePhone?.parkedAnswer?.ok !== false || !/shall I\?/.test(fromThePhone?.parkedAnswer?.text ?? '')) problems.push(`calling a declared tool must ask first, not run: ${fromThePhone?.parkedAnswer?.text}`);
+if (fromThePhone?.pressedAfterYes?.ok !== true || !/all notes deleted/.test(fromThePhone?.pressedAfterYes?.text ?? '')) {
+  problems.push(`after a real yes, a declared tool must reach the page's own function: ${fromThePhone?.pressedAfterYes?.text}`);
+}
+if (pageAfter !== 'deleted') problems.push(`the page itself did not run the confirmed declared tool: ${pageAfter}`);
 
 await ctx.close().catch(() => {});
 rmSync(profile, { recursive: true, force: true });

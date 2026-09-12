@@ -183,17 +183,15 @@ const PT = {
 
   /** ISOLATED <-> MAIN, over window.postMessage: the tools the SITE declares for itself.
    *
-   * STILL NOT BUILT, and it is written here in the present tense so that nobody reads this
-   * list as a working path: main-world.js does NOT answer these — it is the empty listener it
-   * has always been — isolated.js does not ask, and no scan carries a declared list.
+   * BUILT AND EXERCISED, against the real document.modelContext rather than a stand-in:
+   * main-world.js reads the declaration and runs a declared tool, isolated.js asks with a
+   * deadline and puts the answer on the scan as `declared`, and scripts/declared-tools.mjs
+   * checks the whole of that on a page which declares two tools of its own.
    *
-   * What exists is the SHAPE below and an instrument that fails on it, scripts/declared-tools.mjs.
-   * I wrote this sentence claiming main-world.js already answered, because a version of it was
-   * sitting in my own worktree while I measured the platform — and then I handed that file back
-   * to its owner and left the sentence behind. The reviewer caught it one commit after the
-   * commit that existed solely to fix the same kind of overclaiming. Twice in an hour is not
-   * carelessness about words; it is what happens when a comment describes intent rather than
-   * the file it sits next to.
+   * This sentence has now been wrong in both directions within one afternoon — claiming a path
+   * that did not exist, then denying one that did — each time because it described what the
+   * writer had in mind rather than the files beside it. If you change either end, change this
+   * line in the same commit.
    *
    * The rule about them is older than the path and is tested: gating.js insists a tool a SITE
    * declared is put to the person out loud, whatever the tool says about itself, because
