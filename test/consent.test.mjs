@@ -11,7 +11,19 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadShared } from './load-shared.mjs';
 
-const { question, written, readAnswer } = loadShared('consent.js', 'Consent');
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+/* The real brick, not a stand-in for it. What counts as a value is exactly the rule the fill
+ * path refuses on, and a hand-written stub here would let the two drift apart silently — which
+ * is the whole reason consent.js asks it rather than keeping its own list. */
+const here = dirname(fileURLToPath(import.meta.url));
+const FilledIn = new Function(
+  `${readFileSync(join(here, '..', 'vendor', 'filled-in.js'), 'utf8')}\n;return FilledIn;`
+)();
+
+const { question, written, readAnswer } = loadShared('consent.js', 'Consent', { FilledIn });
 
 /** A schema describing the named arguments, the way a synthesized tool's does. Every real
  *  caller passes one: an argument the schema does not describe is never spoken, so a test
@@ -55,6 +67,27 @@ test('an empty value is left out rather than read back as nothing', () => {
   const said = question('Submit the form', { note: '   ', kept: 'yes' }, describing('note', 'kept'));
   assert.doesNotMatch(said, /note/);
   assert.match(said, /kept "yes"/);
+});
+
+test('a placeholder is not a value, so it is not read back', () => {
+  // Measured on the wizard: the model called the submit with the selects' own placeholder
+  // text, and the gate read "-Select-" back as if somebody had chosen it.
+  const said = question(
+    'Fill in and submit "Next"',
+    { monthOfBirth: '-Select-', state: '-Select-', dayOfBirth: '12' },
+    describing('monthOfBirth', 'state', 'dayOfBirth')
+  );
+  assert.doesNotMatch(said, /Select/);
+  assert.match(said, /dayOfBirth "12"/);
+});
+
+test('a form of nothing but placeholders is a question with no values in it', () => {
+  const said = question(
+    'Fill in and submit "Next"',
+    { monthOfBirth: '-Select-', state: '-Select-' },
+    describing('monthOfBirth', 'state')
+  );
+  assert.equal(said, 'Fill in and submit "Next" — shall I?');
 });
 
 test('a password is named and never spoken', () => {

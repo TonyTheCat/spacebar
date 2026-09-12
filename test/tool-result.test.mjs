@@ -39,6 +39,18 @@ test('ok is a real boolean, because the caller decides what to say from it', () 
   assert.equal(capped(null).text, '');
 });
 
+test('everything else the answer came with survives the cap', () => {
+  // The page side sends `problems` — the page's own complaints — and `moved`, which says the
+  // press took the page with it. Rebuilding the object out of ok and text alone dropped both,
+  // and a field nobody can see is a field nobody can act on.
+  const kept = capped({ ok: true, text: 'short', moved: true, problems: ['year is not a year'] });
+  assert.equal(kept.moved, true);
+  assert.deepEqual(kept.problems, ['year is not a year']);
+  const cut = capped({ ok: true, text: 'x'.repeat(9000), moved: true }, 100);
+  assert.equal(cut.moved, true);
+  assert.ok(cut.text.includes('[cut here'));
+});
+
 test('the line carries the length, because ok with nothing in it is a bug', () => {
   assert.equal(written('read_page', { ok: true, text: 'x'.repeat(1873) }), 'read_page → ok, 1873 chars');
   assert.equal(written('read_page', { ok: true, text: '' }), 'read_page → ok, 0 chars');

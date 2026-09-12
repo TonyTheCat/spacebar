@@ -27,6 +27,10 @@
  * written down either.
  */
 
+/* It needs vendor/filled-in.js loaded in the same scope: what counts as a value — and what is
+ * only a placeholder standing in for one — is that brick's judgement, and this file asks it
+ * rather than keeping a second opinion of its own. Both live on the phone page. */
+
 /** How much of a value is read out before it is cut. Long enough for an address
  *  or a note, short enough that nobody has to sit through a pasted essay. */
 const SPOKEN_VALUE_LIMIT = 200;
@@ -128,7 +132,17 @@ const Consent = {
   question(description, args, schema) {
     const properties = schema?.properties;
     const said = Object.entries(args ?? {})
-      .filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== '')
+      /* A PLACEHOLDER IS NOT A VALUE, and the judgement is the brick's rather than ours.
+       *
+       * Measured on the wizard: the model called the submit with monthOfBirth "-Select-" and
+       * state "-Select-" — the selects' own placeholder text, read off the page as if somebody
+       * had chosen it — and the gate read both back out loud. Somebody who cannot see the form
+       * then hears two answers they never gave, in the one sentence written to be checked.
+       *
+       * FilledIn.hasAValue already knows what a value is: it is the same rule the fill path
+       * refuses on, so the question and the refusal cannot drift apart. Keeping our own list
+       * of placeholder words here would be a second opinion about the same fact. */
+      .filter(([, value]) => FilledIn.hasAValue(value))
       .map(([name, value]) => {
         /* One wording for both reasons, on purpose. Saying "which I am not
          * saying out loud" for a password and something else for a value we
