@@ -54,6 +54,32 @@
  */
 
 /**
+ * What a SITE declares about itself, read from `document.modelContext` in the page's own world.
+ *
+ * MEASURED against the real API in Chrome for Testing with --enable-features=WebMCP, because
+ * two of these are traps that a reasonable implementation walks into:
+ *
+ *   getTools() answers objects carrying name, description, title, origin, window — and
+ *   `inputSchema` AS A JSON STRING. Passed on unparsed it is not a schema at all: `properties`
+ *   is undefined, and the gate's rule that an argument no schema describes is never spoken out
+ *   loud would then hide ordinary values from the person while reading back nothing useful.
+ *   So it is parsed here, once, and travels as an object like every other schema.
+ *
+ *   executeTool takes the TOOL OBJECT itself rather than a name, and its arguments as a JSON
+ *   STRING. An object or undefined both answer "Failed to parse input arguments".
+ *
+ * `available` is the platform question — is there a modelContext at all — and it is kept apart
+ * from an empty list for the reason the whole product keeps them apart: a browser without the
+ * flag and a page that declares nothing are the same empty array and mean opposite things.
+ *
+ * @typedef {object} DeclaredReport
+ * @property {boolean} available          Is the WebMCP API present in this browser at all?
+ * @property {'document'|'navigator'|null} where  Which object carried it.
+ * @property {Tool[]} tools               Always source 'declared', which makes them gated.
+ * @property {string} [reason]            Why there is nothing, in words for a log.
+ */
+
+/**
  * What the ISOLATED content script answers a PT.READ_REQUEST with.
  *
  * ALREADY SHAPED, and that is the decision this typedef exists to record. Choosing between
@@ -157,18 +183,30 @@ const PT = {
 
   /** ISOLATED <-> MAIN, over window.postMessage: the tools the SITE declares for itself.
    *
-   * NOTHING SENDS THESE AND NOTHING ANSWERS THEM. They are names waiting for a path that has
-   * not been built: main-world.js listens and replies to nothing, isolated.js never asks, and
-   * no scan carries a declared list. Said here because the earlier version of this comment
-   * described the wire as if it ran, and a name in a protocol file reads as a thing that
-   * exists.
+   * STILL NOT BUILT, and it is written here in the present tense so that nobody reads this
+   * list as a working path: main-world.js does NOT answer these — it is the empty listener it
+   * has always been — isolated.js does not ask, and no scan carries a declared list.
    *
-   * The one piece that IS built is the rule about them: gating.js insists that a tool a SITE
+   * What exists is the SHAPE below and an instrument that fails on it, scripts/declared-tools.mjs.
+   * I wrote this sentence claiming main-world.js already answered, because a version of it was
+   * sitting in my own worktree while I measured the platform — and then I handed that file back
+   * to its owner and left the sentence behind. The reviewer caught it one commit after the
+   * commit that existed solely to fix the same kind of overclaiming. Twice in an hour is not
+   * carelessness about words; it is what happens when a comment describes intent rather than
+   * the file it sits next to.
+   *
+   * The rule about them is older than the path and is tested: gating.js insists a tool a SITE
    * declared is put to the person out loud, whatever the tool says about itself, because
-   * WebMCP carries no statement of consequence. That rule is tested and has never fired,
-   * because nothing yet produces a tool with source 'declared'. */
+   * WebMCP carries no statement of consequence — it has a name, a description and a schema,
+   * and nothing that says whether calling it reads something or changes something. */
   DECLARED_REQUEST: 'declared-request',
   DECLARED_RESULT: 'declared-result',
+
+  /** phone -> ISOLATED -> MAIN: run one of the tools the SITE declared, and the answer back.
+   *  It cannot go the way a synthesized tool goes: the page's own function is reachable only
+   *  from the page's own world. */
+  DECLARED_EXECUTE_REQUEST: 'declared-execute-request',
+  DECLARED_EXECUTE_RESULT: 'declared-execute-result',
 
   /** How long the ISOLATED world would wait for the MAIN world before deciding the page
    *  declares nothing — for the path above, when it is built. */
