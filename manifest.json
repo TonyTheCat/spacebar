@@ -40,6 +40,9 @@
         "vendor/filled-in.js",
         "vendor/drive-the-page.js",
         "src/shared/protocol.js",
+        "src/shared/gating.js",
+        "src/shared/readable.js",
+        "src/shared/push-to-talk.js",
         "src/content/isolated.js"
       ],
       "run_at": "document_idle",
