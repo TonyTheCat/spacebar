@@ -195,8 +195,9 @@ const onServerEvent = (message) => {
     mayReconnect = true;
     theLine.live();
     sayOutLoud(VoiceLines.CONNECTED);
-    // And the first list, so the model has something to act with before it is asked anything.
-    void readThePageAndPublish('the first set');
+    // Somewhere real to be, and then the first list — so the model has something to act with
+    // before it is asked anything, rather than a blank tab and no tools at all.
+    void openTheStartPageIfNothingElseDid().then(() => readThePageAndPublish('the first set'));
   }
 
   if (event.type === 'session.updated') {
@@ -551,12 +552,44 @@ const OUR_TOOLS = [
     type: 'function',
     name: 'open_site',
     description:
-      'Go somewhere. Use this when they name a place rather than something on this page — ' +
-      'a site by name, an address, or a thing to search the web for.',
+      'Go to a website. Use it when they name somewhere to go rather than something on this ' +
+      'page. Takes a name you know or an address; if it is neither, say so instead of guessing.',
     parameters: {
       type: 'object',
-      properties: { said: { type: 'string', description: 'What they said, in their own words.' } },
-      required: ['said'],
+      properties: {
+        site: { type: 'string', description: 'What they said: a site name, or an address.' },
+      },
+      required: ['site'],
+    },
+  },
+  /* One field at a time, for a form that is a conversation rather than a form.
+   *
+   * The synthesizer CLAIMS the fields of a submit widget, so the only thing offered there is
+   * "fill in and submit all of it". On a wizard with required fields — a date of birth, a
+   * state, a citizenship — that is the wrong shape for a voice: the model fills what it has,
+   * leaves the rest at a placeholder, and the page comes back with four errors while the
+   * person hears "submitted".
+   *
+   * So this puts in ONE value and commits nothing. Deliberately NOT gated: typing into a box
+   * sends nothing, and asking permission for each keystroke is the gate crying wolf until
+   * nobody hears it. The submit stays gated and unchanged. */
+  {
+    type: 'function',
+    name: 'fill_in',
+    description:
+      'Put one value into one field of a form on this page, without submitting anything. Use ' +
+      'it for a form whose required fields are still empty: ask them for one value out loud, ' +
+      "fill it in, then ask for the next. The field names and the values a select will accept " +
+      "are in the submit tool's own schema. Never invent a value, and never leave a required " +
+      'field at its placeholder.',
+    parameters: {
+      type: 'object',
+      properties: {
+        tool: { type: 'string', description: 'The name of the submit tool this field belongs to.' },
+        field: { type: 'string', description: "The field, named as that tool's schema names it." },
+        value: { type: 'string', description: 'What they said, as they said it.' },
+      },
+      required: ['tool', 'field', 'value'],
     },
   },
   {
@@ -602,6 +635,32 @@ const handToTheSession = async (tools, why) => {
   const how = await wait.promise;
   if (how === 'timed out') log('the session never acknowledged that list — answering anyway');
   return how === 'settled';
+};
+
+/** One fallback, once per phone: somewhere real to start.
+ *
+ * A browser that comes up on a blank tab is nothing at all to somebody who cannot see it —
+ * there is no page, so there are no tools, so the voice can do nothing and cannot say why.
+ * The helper sets a start page in the settings; with nothing there it is a sensible default.
+ *
+ * ONE attempt, and only when there is actually a blank tab to use. A phone that loads while
+ * somebody is reading a real page has not spent it, and is still there for the blank tab that
+ * appears later. Every attempt would be a policy nobody asked for — it would keep pulling them
+ * back to a start page they had deliberately left. */
+const startHere = StartHere.create();
+
+const openTheStartPageIfNothingElseDid = async () => {
+  const tabs = await chrome.tabs.query({});
+  const ours = chrome.runtime.getURL('');
+  const blank = startHere.decide(tabs.filter((tab) => !String(tab.url ?? tab.pendingUrl ?? '').startsWith(ours)));
+  if (!blank || blank.id === undefined) return;
+  const { startPage } = await chrome.storage.local.get('startPage');
+  const where = KnownSites.startPage(startPage);
+  handedOverAt = Date.now();
+  await chrome.tabs.update(blank.id, { url: where, active: true });
+  pageTabId = blank.id;
+  log(`nothing was open, so the blank tab was sent to ${where}`);
+  await waitForThePage(blank.id);
 };
 
 /** Scan whatever page the person is on and publish what it offers.
@@ -661,6 +720,11 @@ const openSite = async (said) => {
   const tab = theirs.find((one) => one.id === pageTabId) ?? theirs.find((one) => one.active) ?? KnownSites.pickBlankTab(theirs);
   const how = GoingThere.how(tab);
 
+  /* From here until the window below closes, a tab coming forward is OUR doing. Read as the
+   * person losing the key, it would end the turn of somebody still speaking — which is exactly
+   * what open_site used to do, mid-sentence. */
+  handedOverAt = Date.now();
+
   let id = tab?.id;
   if (how === 'open a tab') {
     const made = await chrome.tabs.create({ url: where, active: true });
@@ -701,6 +765,30 @@ const readThePage = async () => {
   // Marked as somebody else's words on the way in. A page can write a sentence aimed at the
   // model, or at the person; reported either way, obeyed neither.
   return { ok: true, text: [howMany, Readable.untrusted(String(page.text ?? ''))].filter(Boolean).join(' ') };
+};
+
+/** Put one value into one field. Nothing is committed, so nothing is asked about.
+ *
+ * The answer is the CONTROL's own, read back after the page has taken it: what was asked for
+ * is our intention, what the control holds is the fact. A select given a value it has no
+ * option for keeps what it had, and that read-back is the only way the model learns it did
+ * not go in — otherwise it moves on to the next field believing this one is done.
+ *
+ * @param {{tool?: unknown, field?: unknown, value?: unknown}} args */
+const fillOneField = async (args) => {
+  const tab = await findPageTab();
+  if (!tab || tab.id === undefined) return { ok: false, text: VoiceLines.NO_PAGE.text };
+  const result = await orNothing(
+    chrome.tabs.sendMessage(tab.id, {
+      type: PT.FILL_REQUEST,
+      tool: args?.tool,
+      field: args?.field,
+      value: args?.value,
+    }),
+    'fill_in'
+  );
+  if (!result) return ToolResult.timedOut('fill_in');
+  return ToolResult.capped(result);
 };
 
 /** Run one of the page's own tools, or ask about it first.
@@ -779,8 +867,9 @@ const pressWhatWasParked = async () => {
 const answerTheCall = async (call, name, args) => {
   let result;
   try {
-    if (name === 'open_site') result = await openSite(String(args?.said ?? ''));
+    if (name === 'open_site') result = await openSite(String(args?.site ?? ''));
     else if (name === 'read_page') result = await readThePage();
+    else if (name === 'fill_in') result = await fillOneField(args);
     else if (name === 'confirm_action') result = await pressWhatWasParked();
     else {
       /* Which tool this IS decides whether it may run at all, so it is read from the page
@@ -814,14 +903,6 @@ const republish = Coalesce.after(400, () => {
   if (theLine.isUp) void readThePageAndPublish('the page changed');
 });
 
-chrome.tabs.onUpdated.addListener((id, info) => {
-  if (info.status === 'complete' && id === pageTabId) republish();
-});
-chrome.tabs.onActivated.addListener(({ tabId }) => {
-  pageTabId = tabId;
-  republish();
-});
-
 /* Push to talk, on this page. Held, not toggled: letting go is what ends a turn, and a key
  * that is up is a microphone that is off.
  *
@@ -853,6 +934,78 @@ const talkKeyOnPhone = PushToTalk.create({
   },
 });
 
+/* ============================ the key, held on the PAGE ============================
+ *
+ * This is the product. Somebody who cannot see the screen lives on the site, not on a pinned
+ * tab they never look at — so the space bar has to work where they are. The content script
+ * hears it there and reports it here; the phone tab's own listeners below are the other half,
+ * for a helper sitting at this page.
+ *
+ * BOTH feed the one machine, which is what makes them safe together: two reports of the same
+ * press are one turn, and a release that goes missing on one side is still closed by the other.
+ */
+
+/** The tab holding the key, its window, and whether Chrome had the screen when it began. */
+let holding = /** @type {number|null} */ (null);
+let holdingWindow = /** @type {number|null} */ (null);
+let wasFocused = false;
+
+/** When WE last moved them to another tab. A focus change we caused is not evidence about
+ *  the key. */
+let handedOverAt = 0;
+
+/** Stop the turn, unless the reason is a guess we ourselves caused.
+ *  @param {StopReason} why */
+const closeTheHeldTurn = (why) => {
+  if (why !== 'released' && Handover.expected(handedOverAt, Date.now())) {
+    log('a tab moved because WE moved it — the key is not lost, the turn stands');
+    return;
+  }
+  if (talkKeyOnPhone.stop(why)) {
+    holding = null;
+    holdingWindow = null;
+    if (why !== 'released') log(`the turn ended because ${why}`);
+  }
+};
+
+chrome.runtime.onMessage.addListener((message, sender) => {
+  if (message?.type === PT.TALK_START) {
+    holding = sender.tab?.id ?? null;
+    holdingWindow = sender.tab?.windowId ?? null;
+    void chrome.windows.getLastFocused().then((window) => {
+      wasFocused = window?.focused === true;
+    });
+    talkKeyOnPhone.start();
+    return false;
+  }
+
+  if (message?.type === PT.TALK_STOP) {
+    closeTheHeldTurn(message.why ?? 'released');
+    return false;
+  }
+
+  if (message?.type === PT.NO_TALK_FLAG) {
+    /* The page could not read the talk flag, so it correctly left the space bar alone. Printed
+     * here rather than swallowed: this is the failure that made the key do nothing on a page
+     * with nothing anywhere to say why, and this log is where a sighted helper is looking. */
+    log(`${message.host ?? 'a page'} cannot read the talk flag — the space bar is not ours there`);
+    return false;
+  }
+
+  return false;
+});
+
+/* Every way a held key goes missing while the person is on a page. Each one is a decision
+ * about two facts, and each decision lives in src/shared/holding-the-key.js where it can be
+ * tested — what is here is the chrome.* wiring, which cannot be. */
+chrome.windows.onFocusChanged.addListener((movedTo) => {
+  const why = HoldingTheKey.windowFocusMoved({ holding, holdingWindow, wasFocused, movedTo });
+  if (why) closeTheHeldTurn('lost-sight');
+});
+chrome.tabs.onRemoved.addListener((id) => {
+  if (HoldingTheKey.tabWasRemoved(holding, id)) closeTheHeldTurn('lost-sight');
+});
+
 window.addEventListener('keydown', (event) => {
   if (!PushToTalk.claims(theLine.isUp, event.code)) return;
   // Not the page's space bar while a session is live: it would scroll under the person.
@@ -870,6 +1023,24 @@ window.addEventListener('keyup', (event) => {
 window.addEventListener('blur', () => talkKeyOnPhone.lostSight());
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') talkKeyOnPhone.lostSight();
+});
+
+/* The tab listeners are registered HERE, last, and that is not tidiness.
+ *
+ * They call closeTheHeldTurn and read `holding`, both declared above with `let` and `const` —
+ * which are in the temporal dead zone until this file has finished evaluating. A tab
+ * activation arriving in that window would throw a ReferenceError inside a listener nobody is
+ * watching, which is the quietest way for a key to stop working. Registered after everything
+ * they touch exists, there is no such window. */
+chrome.tabs.onUpdated.addListener((id, info) => {
+  if (info.status === 'complete' && id === pageTabId) republish();
+});
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  // A different tab in front of the page holding the key is a real loss — and the one case
+  // the person causes themselves. Unless we caused it, which closeTheHeldTurn knows about.
+  if (HoldingTheKey.tabCameForward(holding, tabId)) closeTheHeldTurn('lost-sight');
+  pageTabId = tabId;
+  republish();
 });
 
 byId('connect').addEventListener('click', () => void connect());
