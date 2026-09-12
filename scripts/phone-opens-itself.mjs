@@ -20,12 +20,44 @@
  * when no phone opens, or when the one that opens is a corpse from a dead extension context.
  */
 import { chromium } from '/Users/anton/work/hackathon/hackathon-spike/node_modules/playwright/index.mjs';
-import { mkdtempSync, rmSync } from 'node:fs';
+
+/* A browser that never starts is a FAILED check, not a silent one.
+ *
+ * Without this the launch throws, the process dies on an uncaught rejection, and the shell
+ * still sees exit 0 from the pipeline it was in — so a run that never tested anything reads as
+ * a pass. That is worse than no check: it is a check that lies in the reassuring direction. */
+process.on('unhandledRejection', (why) => {
+  console.error(`the browser did not start: ${String(why).slice(0, 300)}`);
+  process.exit(2);
+});
+import { mkdtempSync, rmSync, existsSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 const EXT = process.env.EXT;
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const profile = process.env.PROFILE || mkdtempSync(join(tmpdir(), 'calm-'));
+/* A COPIED PROFILE CARRIES ITS LOCK, and Chrome then refuses to start at all.
+ *
+ * SingletonLock, SingletonSocket and SingletonCookie are symlinks naming the machine and the
+ * process that last held the profile. Copy a profile and they come with it, pointing at a
+ * process that is not this one — Chrome prints "Failed to create a ProcessSingleton for your
+ * profile directory ... Aborting now to avoid profile corruption" and exits 21.
+ *
+ * This cost a whole afternoon. The failure looks nothing like a lock: the browser simply never
+ * comes up, and an instrument that copied a profile reports no phone — which reads exactly
+ * like the product being broken, and sent three people looking for a defect in the extension
+ * that was not there.
+ *
+ * They are runtime artifacts, not profile data, so removing them from the copy takes nothing
+ * away. Never do this to a profile somebody is using — only to a copy. */
+for (const lock of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
+  const at = join(profile, lock);
+  if (existsSync(at)) {
+    unlinkSync(at);
+    console.log(`removed a stale ${lock} from the profile copy`);
+  }
+}
+
 const ctx = await chromium.launchPersistentContext(profile, {
   headless: false,
   args: [`--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`, '--mute-audio',
