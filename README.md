@@ -57,6 +57,60 @@ not believe us.
 node verify-tools/errand-check.mjs
 ```
 
+## Setting it up, once, by somebody who can see
+
+The person who will use Spacebar never sees a settings page. Somebody sighted does this once,
+sitting next to them, and then hands the machine over.
+
+1. **Load it** — see [Loading it into Chrome](#loading-it-into-chrome) below.
+2. **Open the settings page.** Right-click the Spacebar icon in the toolbar → *Options*.
+3. **Enter the OpenAI key** and press *Save the key*. It is kept in this Chrome profile and
+   sent nowhere but OpenAI. The page confirms that a key is saved and never shows it back.
+4. **Press *Check the microphone*.** Chrome asks for the microphone once, in a dialog. Answer
+   it now, while you can see it — otherwise the first thing they say goes into a box they
+   cannot find.
+5. **Close the tab.** There is nothing else to press, ever.
+
+The key lives in that Chrome profile, so set it up in the profile they will actually use.
+
+## Using it
+
+1. **Open Chrome.** A pinned tab opens by itself, connects, and says where you are. Nothing to
+   find, nothing to click.
+2. **Hold the space bar** on the page you are on — not in any window of ours — and say what you
+   want: *"search for the benefit finder"*, *"open the second one"*, *"tick disability and
+   apply"*. **Let go** when you are done. The microphone is closed while the key is up.
+3. **It acts, and tells you what came of it:** where you are now, or the first few results by
+   name. Ask for more if you want the rest.
+4. **Before anything is sent, it asks first** — and the question carries the values about to
+   go: *"…with disability "true" — shall I?"* Say **yes** and it presses; say **no** and the
+   page does not move. Only your own spoken yes counts.
+5. **A password is named, never spoken.** The question says *"password filled in, which I am
+   not saying out loud"*, and the log writes `(hidden)`.
+
+One field per turn, in the page's own words: *"July"* for a month, the option as the page
+lists it. A whole form in one breath is more than the model will fill.
+
+### What it says when something is wrong
+
+These are the phone's own sentences, recorded in advance (`vendor/voice-lines.js`), so they
+sound the same every time — including the times when the session itself is what has broken:
+
+| when | it says |
+|---|---|
+| no key saved yet | *Page Tools is not set up yet. Ask your helper to enter the key in its settings.* |
+| the key was rejected | *The key was refused. Ask your helper to check it in the settings.* |
+| connected | *Ready. Hold the space bar and tell me what you want.* |
+| the connection dropped | *The connection dropped. Reconnecting.* |
+| it could not come back | *I could not get the connection back. Press Connect to try again.* |
+| the microphone is blocked | *I can't hear you. The microphone is not allowed for this browser.* |
+| no page to work on | *There is no page open for me to work on. Open a site and try again.* |
+| the key was held too long | *I stopped listening. Let go of the key and press it again.* |
+
+The pinned tab shows the same in writing: a state line (*not connected*, *connected, hold Space
+to talk*, *reconnecting…*) and a log of what happened. If something goes wrong, that log is
+where to look.
+
 ## Working on this repository
 
 Nothing is installed. There is no build step and no dependency — the folder is what Chrome
