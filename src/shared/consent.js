@@ -38,16 +38,40 @@ const listOut = (parts) =>
     ? (parts[0] ?? '')
     : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
 
-/** Is this argument one that must never be spoken or logged?
+/** Must this argument be withheld — from the room and from the log?
  *
- * `writeOnly` and `format: "password"` are the words JSON Schema already has
- * for it, so nothing here invents an idiom of ours that a tool author would
- * have to know about.
+ * Two reasons, and the second one is the one that was missing.
  *
- * @param {JsonSchema & {writeOnly?: boolean}} [property]
+ * THE SCHEMA SAYS SO. `writeOnly` and `format: "password"` are the words JSON
+ * Schema already has for it, so nothing here invents an idiom of ours that a
+ * tool author would have to know about.
+ *
+ * OR THE SCHEMA DOES NOT DESCRIBE THIS ARGUMENT AT ALL, which is the case that
+ * read a password out loud. The synthesizer names a property after the field's
+ * LABEL; a model calls the tool with whatever name it took from the
+ * description. Measured on the gate fixture: the password field is labelled
+ * "Vault password" and named `pin`, so the schema carried `vaultPassword`, the
+ * call carried `pin`, the lookup found nothing, "not a secret" was the answer,
+ * and the question read `pin "hunter2-never-say-this"` into the room.
+ *
+ * So the rule is the other way round: a value we cannot identify is a value we
+ * do not speak. It is not a guess about which words look dangerous — it is the
+ * only honest answer to "what is this?", and the field is still NAMED, so the
+ * person hears that it was filled in.
+ *
+ * The cost is stated rather than hidden: an ordinary argument the schema
+ * happens not to mention is withheld too, and a tool with no schema at all has
+ * every argument withheld. That direction is deliberate. The reverse costs a
+ * password.
+ *
+ * @param {Record<string, JsonSchema & {writeOnly?: boolean}>} [properties]
+ * @param {string} name
  */
-const isSecret = (property) =>
-  property?.writeOnly === true || property?.format === 'password';
+const mustWithhold = (properties, name) => {
+  const property = properties?.[name];
+  if (!property) return true;
+  return property.writeOnly === true || property.format === 'password';
+};
 
 const Consent = {
   /** Words that mean go ahead. Short and literal on purpose: a long list of
@@ -73,10 +97,10 @@ const Consent = {
    * @returns {string}  Ready to drop into a line of text.
    */
   written(args, schema) {
-    const properties = schema?.properties ?? {};
+    const properties = schema?.properties;
     const entries = Object.entries(args ?? {}).map(([name, value]) => [
       name,
-      isSecret(properties[name]) ? '(hidden)' : value,
+      mustWithhold(properties, name) ? '(hidden)' : value,
     ]);
     return JSON.stringify(Object.fromEntries(entries));
   },
@@ -102,11 +126,15 @@ const Consent = {
    * @returns {string}
    */
   question(description, args, schema) {
-    const properties = schema?.properties ?? {};
+    const properties = schema?.properties;
     const said = Object.entries(args ?? {})
       .filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== '')
       .map(([name, value]) => {
-        if (isSecret(properties[name])) {
+        /* One wording for both reasons, on purpose. Saying "which I am not
+         * saying out loud" for a password and something else for a value we
+         * could not identify would tell the room which of the two it is, and a
+         * listener has no use for that distinction. */
+        if (mustWithhold(properties, name)) {
           return `${name} filled in, which I am not saying out loud`;
         }
         const text = String(value).trim();
