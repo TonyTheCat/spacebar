@@ -168,9 +168,12 @@ const turn = Turns.create({
  * sound the session has already sent, and cancelling without clearing leaves the model talking
  * after it has stopped.
  */
+let answerWasCutOff = false;
+
 const askForAnAnswer = () => {
   if (turn.answering) {
     log('they talked over the answer — cancelling it');
+    answerWasCutOff = true;
     send({ type: 'response.cancel' });
     send({ type: 'output_audio_buffer.clear' });
     // And ask once the session says that answer has actually stopped. Asking straight after
@@ -179,8 +182,31 @@ const askForAnAnswer = () => {
     turn.askWhenTheAnswerStops();
     return;
   }
+
+  /* Before it answers, the model is told the last answer did not arrive whole.
+   *
+   * Its own record says it told them everything it produced — including the words we threw
+   * away at the speaker when they interrupted. Without this it never mentions those again, and
+   * the person is left with half a list and no way to know there was more. */
+  if (answerWasCutOff) {
+    answerWasCutOff = false;
+    log('the last answer was cut off — telling it they heard only the beginning');
+    send({
+      type: 'conversation.item.create',
+      item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: CUT_OFF_NOTE }] },
+    });
+  }
   send({ type: 'response.create' });
 };
+
+/** Ask the session to say one line, now.
+ *
+ * Per-response instructions, so it cannot be mistaken for a change to how the whole
+ * conversation behaves. The only place that creates a response for a sentence of OURS rather
+ * than for a turn the person took.
+ *
+ * @param {string} instructions @returns {boolean} */
+const askItToSay = (instructions) => send({ type: 'response.create', response: { instructions } });
 
 /** @param {MessageEvent} message */
 const onServerEvent = (message) => {
@@ -194,10 +220,23 @@ const onServerEvent = (message) => {
     // A line that came up may drop, and one automatic attempt is allowed again.
     mayReconnect = true;
     theLine.live();
-    sayOutLoud(VoiceLines.CONNECTED);
-    // Somewhere real to be, and then the first list — so the model has something to act with
-    // before it is asked anything, rather than a blank tab and no tools at all.
-    void openTheStartPageIfNothingElseDid().then(() => readThePageAndPublish('the first set'));
+    /* Somewhere real to be, then the first list, then hello — in that order, and the order is
+     * the point. The greeting names where they are, so it cannot be said before there is a
+     * page; and the tools have to be in the session's hands before the model is asked for
+     * anything at all, or its first response is built against nothing.
+     *
+     * THE SESSION SAYS IT, not the phone. The recorded lines are for when the session is what
+     * has gone wrong — using one here would put a second voice into an errand, and the phone's
+     * own voice is the sound of something being broken. The clip is the fallback for a line
+     * that cannot be asked for at all. */
+    void openTheStartPageIfNothingElseDid()
+      .then(() => readThePageAndPublish('the first set'))
+      .then((scan) => {
+        if (!theLine.isUp) return; // the line can go while we are getting here
+        if (!askItToSay(Orientation.hello(scan?.title, scan?.url))) {
+          sayOutLoud(VoiceLines.CONNECTED);
+        }
+      });
   }
 
   if (event.type === 'session.updated') {
