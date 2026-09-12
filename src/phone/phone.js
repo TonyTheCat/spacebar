@@ -557,6 +557,10 @@ let heardAt = 0;
  *  @type {{names: string[], wait: ReturnType<typeof OneWait.create>}|null} */
 let accepted = null;
 
+/** Which world each tool on offer has to run in, by name. A declared tool is reachable only
+ *  from the page's own world; everything else goes the ordinary way. @type {Map<string, string>} */
+const sourceInPlay = new Map();
+
 /** What the session itself says it is holding. Only its own acknowledgement may set this: our
  *  belief about what we sent is not evidence about what it took. @type {string[]|null} */
 let heldBySession = null;
@@ -822,10 +826,28 @@ const forgetThePageSchemas = () => {
 
 /** Everything on offer right now, in the order the model reads it. @param {object} scan */
 const toolsOf = (scan) => {
+  /* WHAT THE SITE DECLARED COMES FIRST, AND WHOLE.
+   *
+   * These are not our reading of somebody's markup — they are the page's own statement about
+   * what it offers, under the names it chose. So they are not shortlisted: the shortlist exists
+   * to cut a synthesizer's long tail of buttons down to what a person could be read out, and a
+   * site that publishes four tools has already done that cutting itself.
+   *
+   * Every one of them is gated, whatever it says about itself. gating.js insists on it because
+   * WebMCP carries no statement of consequence at all — a name, a description and a schema, and
+   * nothing that says whether calling it reads something or changes something. "Count the notes"
+   * and "delete the notes" arrive identical in every field that matters. */
+  const declared = scan?.declared?.tools ?? [];
   const page = Shortlist.pick(scan?.synthesized ?? []);
+
   forgetThePageSchemas();
-  for (const tool of page) schemasInPlay.set(tool.name, tool.inputSchema);
-  return [...page.map(asFunctionTool), ...OUR_TOOLS];
+  for (const tool of [...declared, ...page]) schemasInPlay.set(tool.name, tool.inputSchema);
+  // Where each one has to be run, remembered at the moment it was offered: a declared tool goes
+  // to the page's own world, and only the page that declared it can say so.
+  sourceInPlay.clear();
+  for (const tool of declared) sourceInPlay.set(tool.name, 'declared');
+
+  return [...declared.map(asFunctionTool), ...page.map(asFunctionTool), ...OUR_TOOLS];
 };
 
 /** Hand a list to the session and wait for it to say it has taken it.
@@ -1145,7 +1167,7 @@ const fillOneField = async (args) => {
 
 /** Run one of the page's own tools, or ask about it first.
  *  @param {string} name @param {object} args @param {Tool|undefined} tool */
-const runOnThePage = async (name, args, tool, knownSchema) => {
+const runOnThePage = async (name, args, tool, knownSchema, knownSource) => {
   const tab = await findPageTab();
   if (!tab || tab.id === undefined) return { ok: false, text: VoiceLines.NO_PAGE.text };
 
@@ -1169,7 +1191,7 @@ const runOnThePage = async (name, args, tool, knownSchema) => {
    * that what is agreed to is what happens. The press comes later, through confirm_action, and
    * only on the person's own words. */
   if (tool && Gating.mustAskOutLoud(tool)) {
-    parked = { name, args, at: Date.now(), schema: tool.inputSchema };
+    parked = { name, args, at: Date.now(), schema: tool.inputSchema, source: tool.source };
     return {
       ok: false,
       text: Consent.question(tool.description, args, tool.inputSchema),
@@ -1191,7 +1213,17 @@ const runOnThePage = async (name, args, tool, knownSchema) => {
   let refused = '';
   try {
     result = await Promise.race([
-      chrome.tabs.sendMessage(tab.id, { type: PT.EXECUTE_REQUEST, name, args, askedBy: 'phone' }),
+      chrome.tabs.sendMessage(tab.id, {
+      type: PT.EXECUTE_REQUEST,
+      name,
+      args,
+      askedBy: 'phone',
+      // Declared tools cannot run the way ours do — the page's own function lives in the page's
+      // own world — so the content script is told which wire to use. Read from what was OFFERED
+      // rather than from a fresh scan: between the offer and the press the page may have
+      // republished, and a tool sent down the wrong wire simply does not run.
+      source: knownSource ?? sourceInPlay.get(name),
+    }),
       new Promise((done) => setTimeout(() => done('timed out'), PRESS_MS)),
     ]);
   } catch (error) {
@@ -1277,7 +1309,7 @@ const pressWhatWasParked = async () => {
   // The page will ask the extension to confirm this press before it runs it. This is the one
   // press that may be answered yes, and it is answered yes exactly once.
   pressToken = { name: doIt.name, at: Date.now() };
-  const pressed = await runOnThePage(doIt.name, doIt.args, undefined, doIt.schema);
+  const pressed = await runOnThePage(doIt.name, doIt.args, undefined, doIt.schema, doIt.source);
   // Whatever happened, the token does not outlive the press it was minted for.
   pressToken = null;
   return pressed;
@@ -1301,7 +1333,12 @@ const answerTheCall = async (call, name, args) => {
       const scan = tab?.id === undefined
         ? null
         : await askUntilItAnswers(tab.id, { type: PT.SCAN_REQUEST }, 'the scan');
-      const tool = (scan?.synthesized ?? []).find((one) => one.name === name);
+      /* Looked for among BOTH kinds. A declared tool that is not found here is a tool the gate
+       * never sees, and gating.js is the only thing insisting that a site's own tools are put
+       * to the person out loud — so missing it here would silently unlock every one of them. */
+      const tool = [...(scan?.declared?.tools ?? []), ...(scan?.synthesized ?? [])].find(
+        (one) => one.name === name
+      );
       result = await runOnThePage(name, args, tool);
     }
   } catch (error) {
