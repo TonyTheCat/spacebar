@@ -1,0 +1,42 @@
+#!/bin/sh
+
+# The commit gate.
+#
+# There is no build step in this repository on purpose — the folder is loaded into Chrome as
+# it is — and no toolchain either: nothing here is installed, so this hook runs on a fresh
+# clone with node and git and nothing else. That is deliberate. On a day with a clock running,
+# a gate that needs `npm install` first is a gate that gets skipped.
+#
+# The hook is COMMITTED and `core.hooksPath` points at this directory (set by `npm install`,
+# or by hand: `git config core.hooksPath .githooks`). A hook generated into a gitignored
+# directory by an install is worse than none: a clone that was never installed runs no checks
+# at all, silently, while looking exactly like a gated one.
+#
+# The file must stay mode 755. Executed directly, a 644 hook is skipped by git with only a
+# hint that nobody reads.
+
+set -e
+
+# 1. Does the manifest still describe a loadable extension?
+#
+# This is the check with no substitute. Every path in manifest.json is resolved by Chrome and
+# by nothing else: a renamed file or a missing vendor copy shows up as an extension that does
+# not load, or — worse — one that loads with a content script silently absent, which reads
+# exactly like a page that has no tools. And the bricks are classic scripts sharing one global
+# scope, so their ORDER in the manifest is load-bearing: put drive-the-page.js before
+# filled-in.js and the failure is a ReferenceError in the middle of a form being filled in.
+node scripts/check-manifest.mjs
+
+# 2. The tests.
+#
+# The modules in src/shared/ are pure and tested; the test files sit next to them. They are
+# listed explicitly rather than left to `node --test`'s own discovery so that vendor/ — a
+# directory of copied libraries with their own conventions — is never walked, and so that a
+# repository with no tests yet is a repository with nothing to run rather than an error.
+tests=$(git ls-files -co --exclude-standard '*.test.mjs' '*.test.js' | grep -v '^vendor/' || true)
+if [ -n "$tests" ]; then
+  # shellcheck disable=SC2086
+  node --test $tests
+else
+  echo "pre-commit: no test files yet — nothing to run."
+fi

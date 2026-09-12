@@ -56,3 +56,31 @@ not believe us.
 ```
 node verify-tools/errand-check.mjs
 ```
+
+## Working on this repository
+
+Nothing is installed. There is no build step and no dependency — the folder is what Chrome
+loads — so a clone needs `node` (20 or newer) and `git` and nothing else.
+
+The one thing to do once, in a fresh clone, is point git at the committed hook:
+
+```
+npm install          # installs nothing; its only job is to set core.hooksPath
+```
+
+or, the same thing without npm:
+
+```
+git config core.hooksPath .githooks
+```
+
+`.githooks/pre-commit` then runs on every commit: it resolves every path `manifest.json` names
+and refuses a vendored script loaded before something it reads, and it runs the tests. Without
+that one command the hooks directory is simply not consulted and a clone looks exactly like a
+gated one while checking nothing — which is why the line is here rather than assumed.
+
+### Loading it into Chrome
+
+`chrome://extensions` → Developer mode → **Load unpacked** → this folder. Not
+`--load-extension`: in branded Chrome that flag fails silently, with one line in a log and an
+empty extensions page.
