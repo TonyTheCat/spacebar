@@ -52,26 +52,37 @@ p {
 .notice.warning::before {
   content: '⚠';
 }
+/* The eye sits inside the field, at its right edge, the way every password
+   field does it. The input keeps room for it under the text. */
 .key-row {
-  display: flex;
-  gap: 0.5rem;
+  position: relative;
   margin: 0.25rem 0 0.75rem;
 }
 .key-row input {
-  flex: 1 1 auto;
-  min-width: 0;
+  padding-right: 2.75rem;
 }
 .key-row .eye {
-  flex: 0 0 auto;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 2.75rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2.75rem;
   padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--muted);
 }
+.key-row .eye:hover,
 .key-row .eye[aria-pressed='true'] {
   color: var(--ink);
+}
+.key-row .eye:focus-visible {
+  outline: 2px solid var(--good);
+  outline-offset: -3px;
+  border-radius: 6px;
 }
 /* The hidden attribute does nothing on an <svg> in Chrome: the UA rule is HTML-only. */
 .key-row .eye svg[hidden] {
