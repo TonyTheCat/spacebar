@@ -61,9 +61,17 @@ p {
   flex: 1 1 auto;
   min-width: 0;
 }
-.key-row button {
+.key-row .eye {
   flex: 0 0 auto;
-  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  padding: 0;
+  color: var(--muted);
+}
+.key-row .eye[aria-pressed='true'] {
+  color: var(--ink);
 }
 section {
   margin-top: 2rem;

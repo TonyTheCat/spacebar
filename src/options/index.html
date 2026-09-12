@@ -24,7 +24,25 @@
       <label class="field" for="key"><span>OpenAI key</span></label>
       <div class="key-row">
         <input id="key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" />
-        <button id="show-key" type="button" aria-pressed="false" aria-controls="key">Show</button>
+        <button
+          id="show-key"
+          type="button"
+          class="eye"
+          aria-pressed="false"
+          aria-controls="key"
+          aria-label="Show the key"
+          title="Show the key"
+        >
+          <svg class="eye-open" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+          <svg class="eye-shut" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" hidden>
+            <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
+            <circle cx="12" cy="12" r="3" />
+            <path d="M3 3l18 18" />
+          </svg>
+        </button>
       </div>
       <button id="save" type="button">Save the key</button>
       <p id="key-state" class="state" role="status"></p>

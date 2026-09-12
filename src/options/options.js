@@ -37,7 +37,7 @@ const tell = (id, text, tone) => {
 
 /* 1. The key. Saved, cleared from the field, and confirmed — never echoed.
  *
- * "Show" only reveals what the helper is typing right now, so a mistyped
+ * The eye only reveals what the helper is typing right now, so a mistyped
  * character can be seen before it is saved. It does not reveal a saved key:
  * saving clears the field, and nothing reads the key back onto this page. */
 
@@ -47,12 +47,18 @@ void chrome.storage.local.get('openaiKey').then(({ openaiKey }) => {
   else tell('key-state', 'No key yet — Spacebar stays silent until there is one.', 'info');
 });
 
-el('show-key').addEventListener('click', () => {
-  const shown = input('key').type === 'text';
-  input('key').type = shown ? 'password' : 'text';
-  el('show-key').textContent = shown ? 'Show' : 'Hide';
-  el('show-key').setAttribute('aria-pressed', String(!shown));
-});
+/** @param {boolean} shown */
+const showKey = (shown) => {
+  input('key').type = shown ? 'text' : 'password';
+  const eye = el('show-key');
+  eye.setAttribute('aria-pressed', String(shown));
+  eye.setAttribute('aria-label', shown ? 'Hide the key' : 'Show the key');
+  eye.title = shown ? 'Hide the key' : 'Show the key';
+  /** @type {HTMLElement} */ (eye.querySelector('.eye-open')).hidden = shown;
+  /** @type {HTMLElement} */ (eye.querySelector('.eye-shut')).hidden = !shown;
+};
+
+el('show-key').addEventListener('click', () => showKey(input('key').type !== 'text'));
 
 el('save').addEventListener('click', () => {
   const key = input('key').value.trim();
@@ -62,9 +68,7 @@ el('save').addEventListener('click', () => {
   }
   void chrome.storage.local.set({ openaiKey: key }).then(() => {
     input('key').value = '';
-    input('key').type = 'password';
-    el('show-key').textContent = 'Show';
-    el('show-key').setAttribute('aria-pressed', 'false');
+    showKey(false);
     tell('key-state', 'Saved. Spacebar connects by itself from now on.', 'good');
   });
 });
