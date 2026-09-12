@@ -652,7 +652,11 @@ const askUntilItAnswers = async (tabId, message, what) => {
 
 /** The tab the person is on. Never this one, and never another extension page.
  *  @returns {Promise<chrome.tabs.Tab|null>} */
-const findPageTab = async () => {
+/** @param {{lastResort?: boolean}} [how]
+ *   lastResort: may ANY of their tabs be taken when none is the obvious one? True for reading,
+ *   where the phone needs something to drive. False for open_site, where taking an arbitrary
+ *   tab means navigating away from a page somebody was reading — there, a new tab is right. */
+const findPageTab = async (how = {}) => {
   const tabs = await chrome.tabs.query({});
   const ours = chrome.runtime.getURL('');
   const theirs = tabs.filter((tab) => !String(tab.url ?? tab.pendingUrl ?? '').startsWith(ours));
@@ -678,7 +682,9 @@ const findPageTab = async () => {
   // Nothing in the focused window is theirs — the phone may be pinned alone in it. Any active
   // page, then a blank one, which is somewhere a page can be put without taking away a page
   // they were reading.
-  return theirs.find((tab) => tab.active) ?? KnownSites.pickBlankTab(theirs) ?? theirs[0] ?? null;
+  const anyActive = theirs.find((tab) => tab.active) ?? KnownSites.pickBlankTab(theirs);
+  if (anyActive) return anyActive;
+  return how.lastResort === false ? null : (theirs[0] ?? null);
 };
 
 /** A page tool, as the model is shown it. The live element stays in the content script's own
@@ -960,10 +966,19 @@ const openSite = async (said) => {
   if (!where) {
     return { ok: false, text: `I did not understand "${said}" as somewhere to go.` };
   }
-  const tabs = await chrome.tabs.query({});
-  const ours = chrome.runtime.getURL('');
-  const theirs = tabs.filter((tab) => !String(tab.url ?? tab.pendingUrl ?? '').startsWith(ours));
-  const tab = theirs.find((one) => one.id === pageTabId) ?? theirs.find((one) => one.active) ?? KnownSites.pickBlankTab(theirs);
+  /* The same choice as everywhere else, made in one place.
+   *
+   * This used to re-derive its own — and carried the bug findPageTab has just been fixed for:
+   * `active` is true for the active tab of EVERY window, so "go to Wikipedia" with several
+   * windows open could navigate a tab in a window nobody was looking at, while the page in
+   * front of them sat there doing nothing. The reviewer found the second copy after the first
+   * was fixed, which is the argument against having had two.
+   *
+   * lastResort: false, and that is the one difference that matters here. Reading may fall back
+   * to any tab because the phone needs something to look at; SENDING somebody somewhere may
+   * not, because an arbitrary tab is a page they were reading. With nothing suitable,
+   * GoingThere.how(null) says to open a tab, which is the right answer. */
+  const tab = await findPageTab({ lastResort: false });
   const how = GoingThere.how(tab);
 
   /* From here until the window below closes, a tab coming forward is OUR doing. Read as the
