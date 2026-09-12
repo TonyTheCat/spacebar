@@ -195,16 +195,44 @@ const onServerEvent = (message) => {
     mayReconnect = true;
     theLine.live();
     sayOutLoud(VoiceLines.CONNECTED);
+    // And the first list, so the model has something to act with before it is asked anything.
+    void readThePageAndPublish('the first set');
   }
 
   if (event.type === 'session.updated') {
-    log('session.updated ACCEPTED');
+    const names = ToolsAck.namesIn(event.session);
+    log(`session.updated ACCEPTED — tools now: ${names.join(', ') || '(none)'}`);
+    /* Somebody may be holding the model's answer until this arrives, and WHOSE acknowledgement
+     * this is decides whether they may stop holding. A response is created with the tools the
+     * session has AT THAT MOMENT, so answering a tool call before our list is accepted hands
+     * the model the tools of the page it has just left.
+     *
+     * The event carries no correlation id, and there is always something else in flight — the
+     * opening update carries no tools and is acknowledged just the same. So the list ITSELF is
+     * the correlation. An acknowledgement of somebody else's list leaves ours waiting, which
+     * times out honestly instead of confirming something that never happened. */
+    if (accepted && ToolsAck.answers(accepted.names, names)) {
+      accepted.wait.settled();
+      accepted = null;
+    } else if (accepted) {
+      log('that was an acknowledgement of another list — still waiting for ours');
+    }
+  }
+
+  if (event.type === 'response.function_call_arguments.done') {
+    const args = JSON.parse(event.arguments || '{}');
+    // Written down, never printed raw: a password the gate refuses to say out loud is not
+    // protected if the line above it carries the characters in full.
+    log(`the model called ${event.name} with ${Consent.written(args, schemasInPlay.get(event.name))}`);
+    void answerTheCall(String(event.call_id), String(event.name), args);
   }
 
   /* The person's own words, as the session heard them. This is the only evidence the consent
    * gate will ever accept, and the model has no way to write into it. */
   if (event.type === 'conversation.item.input_audio_transcription.completed') {
-    log(`you said: "${String(event.transcript ?? '').trim()}"`);
+    lastHeardFromPerson = String(event.transcript ?? '').trim();
+    heardAt = Date.now();
+    log(`you said: "${lastHeardFromPerson}"`);
   }
 
   if (event.type === 'response.created') turn.answerStarted();
@@ -417,6 +445,375 @@ const openTheLine = async () => {
 
   return true;
 };
+
+/* ============================ the page, and its tools ============================
+ *
+ * One path, and it is the single largest source of defects in this product's history:
+ *
+ *   an action happens -> the page settles -> the new tools are published -> the model is
+ *   answered.
+ *
+ * It looks like four lines. Each arrow is a place two asynchronous things meet.
+ *
+ * A response is created with the tools the session holds AT THAT MOMENT, so answering a tool
+ * call before the new list is accepted hands the model the previous page's tools — and it then
+ * says it cannot act on the page it is looking at. Waiting for `complete` alone does not work
+ * either: nothing has committed a navigation by the time the call returns, so the wait is
+ * answered instantly by the page being LEFT. And session.updated carries no correlation, so
+ * "my tools were accepted" has to be matched by the tool list itself.
+ */
+
+/** The tab the person is working in — not this one. */
+let pageTabId = /** @type {number|null} */ (null);
+
+/** What the person last actually said, and when. The ONLY evidence the gate accepts: the
+ *  model cannot write into a transcript of somebody else's voice. */
+let lastHeardFromPerson = '';
+let heardAt = 0;
+
+/** The list we are waiting to hear accepted. One at a time — a new publish replaces it,
+ *  because what matters is that the LAST list sent has been taken.
+ *  @type {{names: string[], wait: ReturnType<typeof OneWait.create>}|null} */
+let accepted = null;
+
+/** The schema of each tool currently on offer, by name. Kept so that what is read back at the
+ *  gate can be masked by the same rules the schema declares — a password is named, never said. */
+const schemasInPlay = new Map();
+
+/** An action that has been asked about and is waiting for a real answer. */
+let parked = /** @type {{name: string, args: object, at: number}|null} */ (null);
+
+/** How long a parked action stays answerable. A question nobody answered must die rather than
+ *  be answered late: a yes said ninety seconds after the fact is a yes to something else. */
+const PARK_LIFETIME_MS = 90000;
+
+/** How long to wait for the session to accept a tool list before answering anyway. */
+const ACCEPTED_MS = 4000;
+/** How long to wait for a page to finish loading after we sent it somewhere. */
+const PAGE_LOAD_MS = 8000;
+/** One ask of the content script. */
+const ONE_ROUND_TRIP_MS = 4000;
+
+/** Ask something and give up rather than hang. A tool call that never answers leaves the model
+ *  waiting and the person in silence, which is worse than a refusal.
+ *  @template T @param {Promise<T>} asked @param {string} what @param {number} [ms]
+ *  @returns {Promise<T|null>} */
+const orNothing = async (asked, what, ms = ONE_ROUND_TRIP_MS) => {
+  const wait = OneWait.create({ ms });
+  const answer = await Promise.race([
+    asked.then((got) => {
+      wait.settled();
+      return got;
+    }).catch((error) => {
+      wait.settled();
+      log(ToolResult.threw(what, error));
+      return null;
+    }),
+    wait.promise.then(() => null),
+  ]);
+  if (wait.outcome === 'timed out') log(ToolResult.tooLong(what, ms));
+  return answer ?? null;
+};
+
+/** The tab the person is on. Never this one, and never another extension page.
+ *  @returns {Promise<chrome.tabs.Tab|null>} */
+const findPageTab = async () => {
+  const tabs = await chrome.tabs.query({});
+  const ours = chrome.runtime.getURL('');
+  const theirs = tabs.filter((tab) => !String(tab.url ?? tab.pendingUrl ?? '').startsWith(ours));
+  if (pageTabId !== null) {
+    const known = theirs.find((tab) => tab.id === pageTabId);
+    if (known) return known;
+  }
+  // Whatever they are looking at, and a blank tab in preference to nothing: a blank one is
+  // where a page can be put without taking away somewhere they were.
+  const active = theirs.find((tab) => tab.active);
+  return active ?? KnownSites.pickBlankTab(theirs) ?? theirs[0] ?? null;
+};
+
+/** A page tool, as the model is shown it. The live element stays in the content script's own
+ *  registry, keyed by this name; nothing here carries a handle on anything.
+ *  @param {Tool} tool */
+const asFunctionTool = (tool) => ({
+  type: 'function',
+  name: tool.name,
+  description: Gating.mustAskOutLoud(tool)
+    ? `${tool.description} This one has to be put to the person out loud before it happens: call it, and it will hand you the question to ask.`
+    : tool.description,
+  parameters: tool.inputSchema,
+});
+
+/** The tools that are ours rather than the page's. They are the same four on every page,
+ *  which is what makes it possible to start anywhere at all: everything else on offer comes
+ *  from the page already in front of the person. */
+const OUR_TOOLS = [
+  {
+    type: 'function',
+    name: 'open_site',
+    description:
+      'Go somewhere. Use this when they name a place rather than something on this page — ' +
+      'a site by name, an address, or a thing to search the web for.',
+    parameters: {
+      type: 'object',
+      properties: { said: { type: 'string', description: 'What they said, in their own words.' } },
+      required: ['said'],
+    },
+  },
+  {
+    type: 'function',
+    name: 'read_page',
+    description:
+      'What does this page say now? Use it when you arrive somewhere, or when something you ' +
+      'did changed the page. It comes back as the page in parts; say a sentence or two of it.',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    type: 'function',
+    name: 'confirm_action',
+    description:
+      'Only after you asked the question a gated tool handed you, out loud, and they answered. ' +
+      'It reads their own words; it will refuse anything that is not a clear yes.',
+    parameters: { type: 'object', properties: {} },
+  },
+];
+
+/** Everything on offer right now, in the order the model reads it. @param {object} scan */
+const toolsOf = (scan) => {
+  const page = Shortlist.pick(scan?.synthesized ?? []);
+  schemasInPlay.clear();
+  for (const tool of page) schemasInPlay.set(tool.name, tool.inputSchema);
+  return [...page.map(asFunctionTool), ...OUR_TOOLS];
+};
+
+/** Hand a list to the session and wait for it to say it has taken it.
+ *  @param {object[]} tools @param {string} why @returns {Promise<boolean>} accepted? */
+const handToTheSession = async (tools, why) => {
+  const names = tools.map((tool) => String(tool.name));
+  // An older wait is finished rather than left for its own deadline: what matters is that the
+  // LAST list sent has been accepted.
+  accepted?.wait.giveUp();
+  const wait = OneWait.create({ ms: ACCEPTED_MS });
+  accepted = { names, wait };
+  log(`publishing ${names.length} tools (${why})`);
+  if (!send({ type: 'session.update', session: { type: 'realtime', tools } })) {
+    accepted = null;
+    return false;
+  }
+  const how = await wait.promise;
+  if (how === 'timed out') log('the session never acknowledged that list — answering anyway');
+  return how === 'settled';
+};
+
+/** Scan whatever page the person is on and publish what it offers.
+ *  @param {string} why @returns {Promise<object|null>} the scan */
+const readThePageAndPublish = async (why) => {
+  const tab = await findPageTab();
+  if (!tab || tab.id === undefined) {
+    log('there is no page open to read');
+    return null;
+  }
+  pageTabId = tab.id;
+  const scan = await orNothing(chrome.tabs.sendMessage(tab.id, { type: PT.SCAN_REQUEST }), 'the scan');
+  if (!scan || typeof scan !== 'object') {
+    // Could not look. NOT "the page has none" — said apart, the agent reports it lost the page;
+    // run together it tells somebody who cannot see that the thing they asked for is not there.
+    log('the page did not answer a scan');
+    return null;
+  }
+  if (scan.readable === false) {
+    log(`could not read that page: ${scan.error ?? 'no reason given'}`);
+    return scan;
+  }
+  await handToTheSession(toolsOf(scan), why);
+  return scan;
+};
+
+/** A page settles, and only then is it read.
+ *
+ * Waiting for `complete` alone is answered instantly by the page being LEFT — nothing has
+ * committed the navigation by the time the call returns. So the wait is for a `complete` that
+ * arrives AFTER we asked for it, on the tab we asked about, and it has a deadline.
+ *
+ * @param {number} tabId @param {number} ms @returns {Promise<'settled'|'timed out'>} */
+const waitForThePage = async (tabId, ms = PAGE_LOAD_MS) => {
+  const wait = OneWait.create({ ms });
+  const settled = (id, info) => {
+    if (id === tabId && info.status === 'complete') wait.settled();
+  };
+  chrome.tabs.onUpdated.addListener(settled);
+  const how = await wait.promise;
+  chrome.tabs.onUpdated.removeListener(settled);
+  // A grace window after `complete`: a page that has just fired it is still wiring its own
+  // scripts up, and a scan in that instant reports a page with nothing on it.
+  if (how === 'settled') await new Promise((done) => setTimeout(done, 400));
+  return how;
+};
+
+/** Put a page in front of the person. @param {string} said */
+const openSite = async (said) => {
+  const where = KnownSites.resolve(said) ?? KnownSites.searchFor(said);
+  if (!where) {
+    return { ok: false, text: `I did not understand "${said}" as somewhere to go.` };
+  }
+  const tabs = await chrome.tabs.query({});
+  const ours = chrome.runtime.getURL('');
+  const theirs = tabs.filter((tab) => !String(tab.url ?? tab.pendingUrl ?? '').startsWith(ours));
+  const tab = theirs.find((one) => one.id === pageTabId) ?? theirs.find((one) => one.active) ?? KnownSites.pickBlankTab(theirs);
+  const how = GoingThere.how(tab);
+
+  let id = tab?.id;
+  if (how === 'open a tab') {
+    const made = await chrome.tabs.create({ url: where, active: true });
+    id = made.id;
+  } else {
+    await chrome.tabs.update(/** @type {number} */ (id), { url: where, active: true });
+  }
+  if (id === undefined) return { ok: false, text: 'I could not open a tab.' };
+  pageTabId = id;
+  log(`${how}: ${where}`);
+
+  const settled = await waitForThePage(id);
+  const scan = await readThePageAndPublish('a new page');
+  const here = Orientation.arrived(scan?.title, scan?.url ?? where);
+  return {
+    ok: true,
+    text:
+      settled === 'timed out'
+        ? `${here} It is still loading, so there may be more of it in a moment.`
+        : here,
+  };
+};
+
+/** What does this page say now? @returns {Promise<{ok: boolean, text: string}>} */
+const readThePage = async () => {
+  const tab = await findPageTab();
+  if (!tab || tab.id === undefined) return { ok: false, text: VoiceLines.NO_PAGE.text };
+  const page = await orNothing(chrome.tabs.sendMessage(tab.id, { type: PT.READ_REQUEST }), 'the read');
+  if (!page) return { ok: false, text: 'That page did not answer.' };
+  const results = Readable.results(page);
+  // Marked as somebody else's words on the way in. A page can write a sentence aimed at the
+  // model, or at the person; reported either way, obeyed neither.
+  return { ok: true, text: Readable.untrusted(results || Readable.shape(page)) };
+};
+
+/** Run one of the page's own tools, or ask about it first.
+ *  @param {string} name @param {object} args @param {Tool|undefined} tool */
+const runOnThePage = async (name, args, tool) => {
+  const tab = await findPageTab();
+  if (!tab || tab.id === undefined) return { ok: false, text: VoiceLines.NO_PAGE.text };
+
+  /* The gate. A tool the page marked as committing something is NOT run: it is parked, and the
+   * model is handed the sentence it must say — which contains the values about to be sent, so
+   * that what is agreed to is what happens. The press comes later, through confirm_action, and
+   * only on the person's own words. */
+  if (tool && Gating.mustAskOutLoud(tool)) {
+    parked = { name, args, at: Date.now() };
+    return {
+      ok: false,
+      text: Consent.question(tool.description, args, tool.inputSchema),
+    };
+  }
+
+  const was = await chrome.tabs.get(tab.id).catch(() => null);
+  const result = await orNothing(
+    chrome.tabs.sendMessage(tab.id, { type: PT.EXECUTE_REQUEST, name, args, askedBy: 'phone' }),
+    name,
+    PAGE_LOAD_MS
+  );
+  if (!result) return ToolResult.timedOut(name);
+
+  // The action may have taken them somewhere. Let it settle, then publish what is there now —
+  // BEFORE the model is answered, or its next response is built against the page it has left.
+  const now = await chrome.tabs.get(tab.id).catch(() => null);
+  if (now && was && now.url !== was.url) {
+    await waitForThePage(tab.id);
+  }
+  await readThePageAndPublish('after an action');
+  return ToolResult.capped(result);
+};
+
+/** Press what was parked, if their own words say yes. */
+const pressWhatWasParked = async () => {
+  if (!parked) {
+    return { ok: false, text: 'There is nothing waiting to be confirmed. Call the tool first.' };
+  }
+  if (Date.now() - parked.at > PARK_LIFETIME_MS) {
+    parked = null;
+    return { ok: false, text: 'That question is too old to answer now. Ask it again.' };
+  }
+  /* Their answer has to have been said AFTER the question was parked. Without the timestamp
+   * the model can park an action and confirm it in the same breath, using a "yes" the person
+   * said about something else entirely. */
+  if (heardAt < parked.at) {
+    return { ok: false, text: 'I have not heard their answer yet. Ask, and wait for them.' };
+  }
+  const answer = Consent.readAnswer(lastHeardFromPerson);
+  if (answer !== 'yes') {
+    const was = parked;
+    parked = null;
+    log(`not confirmed (${answer}) — ${was.name} was not pressed`);
+    return {
+      ok: false,
+      text:
+        answer === 'no'
+          ? 'They said no. Nothing was sent. Say so plainly and stop.'
+          : 'That was not a clear yes, so nothing was sent. Ask them again in plain words.',
+    };
+  }
+  const doIt = parked;
+  parked = null;
+  log(`confirmed by their own words — pressing ${doIt.name}`);
+  return runOnThePage(doIt.name, doIt.args, undefined);
+};
+
+/** Answer one tool call. Every path answers, whatever happens inside it: a call that never
+ *  comes back leaves the model waiting and the person in silence.
+ *  @param {string} call @param {string} name @param {object} args */
+const answerTheCall = async (call, name, args) => {
+  let result;
+  try {
+    if (name === 'open_site') result = await openSite(String(args?.said ?? ''));
+    else if (name === 'read_page') result = await readThePage();
+    else if (name === 'confirm_action') result = await pressWhatWasParked();
+    else {
+      /* Which tool this IS decides whether it may run at all, so it is read from the page
+       * rather than remembered: the list the model is holding can be a page old, and a gated
+       * tool remembered as ungated is the whole product failing quietly. */
+      const tab = await findPageTab();
+      const scan = tab?.id === undefined
+        ? null
+        : await orNothing(chrome.tabs.sendMessage(tab.id, { type: PT.SCAN_REQUEST }), 'the scan');
+      const tool = (scan?.synthesized ?? []).find((one) => one.name === name);
+      result = await runOnThePage(name, args, tool);
+    }
+  } catch (error) {
+    log(ToolResult.threw(name, error));
+    result = { ok: false, text: `That went wrong on the page: ${String(error).slice(0, 160)}` };
+  }
+  log(ToolResult.written(name, result));
+  send({
+    type: 'conversation.item.create',
+    item: { type: 'function_call_output', call_id: call, output: JSON.stringify(result) },
+  });
+  // The model is asked for its answer only now — after the page settled and its tools were
+  // published, which is the whole of the one path.
+  send({ type: 'response.create' });
+};
+
+/* A page the person navigated themselves is still a new page. Coalesced, because a single
+ * load fires several of these and republishing on each one sends three lists the session has
+ * to take in order. */
+const republish = Coalesce.after(400, () => {
+  if (theLine.isUp) void readThePageAndPublish('the page changed');
+});
+
+chrome.tabs.onUpdated.addListener((id, info) => {
+  if (info.status === 'complete' && id === pageTabId) republish();
+});
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  pageTabId = tabId;
+  republish();
+});
 
 /* Push to talk, on this page. Held, not toggled: letting go is what ends a turn, and a key
  * that is up is a microphone that is off.
