@@ -157,6 +157,35 @@ on five of its surfaces `document.modelContext` is present — Chrome provides i
 it is why the twenty-five tools Spacebar has there, the button above included, are read off the
 markup rather than declared.
 
+## When a site declares its own tools
+
+Everything above is Spacebar reading a page's markup. A site can also publish tools for an
+agent directly, through Chrome's WebMCP — `document.modelContext` — and when one does, Spacebar
+uses **those**, under the names the site chose, ahead of anything it worked out for itself. A
+site saying what it offers beats a stranger guessing from buttons.
+
+**Every declared tool is asked about out loud, whatever it says about itself.** This is not
+caution, it is a hole in the specification: a declared tool arrives with a name, a description
+and a schema, and nothing at all that says whether calling it reads something or changes
+something. "Count the notes" and "delete the notes" are identical in every field that matters,
+so the only honest default is to ask. The person's own spoken yes is what presses it, exactly
+as for anything else that cannot be undone.
+
+**Measured, not claimed.** `node scripts/declared-tools.mjs` serves a page that declares two
+tools of its own — one that counts, one that deletes everything — and drives the real
+`document.modelContext` rather than a stand-in. One run shows both halves of the promise:
+
+```
+delete_all_notes  ->  "Delete every note. This cannot be undone,
+                       with sure "yes" — shall I?"        the page: counted
+their own words:  "yes please"
+confirm_action    ->  ok, "all notes deleted"             the page: deleted
+```
+
+Chrome exposes `document.modelContext` under `--enable-features=WebMCP`, and it still does with
+an extension loaded — checked in three configurations, because the opposite was believed for
+long enough to shape a plan around it.
+
 ## Working on this repository
 
 Nothing is installed. There is no build step and no dependency — the folder is what Chrome
@@ -178,6 +207,28 @@ git config core.hooksPath .githooks
 and refuses a vendored script loaded before something it reads, and it runs the tests. Without
 that one command the hooks directory is simply not consulted and a clone looks exactly like a
 gated one while checking nothing — which is why the line is here rather than assumed.
+
+### The three checks that need a browser
+
+`npm run verify` runs on every commit and needs nothing but node. Three things cannot be checked
+that way, because they are about what Chrome does, and all three are kept OUT of the commit
+hook on purpose: ten seconds and a browser per commit is a gate that gets switched off within a week.
+
+```sh
+node scripts/phone-opens-itself.mjs     # PROFILE=/a/copy/of/a/real/profile, EXT=…
+node scripts/declared-tools.mjs         # serves its own declaring page
+node scripts/connect-publishes-tools.mjs # a real page and a blank tab, as a recorder has them
+```
+
+Run them before recording anything, before submitting anything, and after touching which tab
+the phone follows or how tools reach the session. Each spends no key and no session, prints
+what it saw, and exits non-zero when the thing it is named after does not happen.
+
+**Copy a profile before pointing one at it, and the copy needs its lock removed.**
+`SingletonLock`, `SingletonSocket` and `SingletonCookie` name the process that last held a
+profile; copied along, Chrome refuses to start at all and the run looks exactly like a broken
+extension. `phone-opens-itself.mjs` strips them from the copy it is given and says so — never
+do it to a profile somebody is using.
 
 ### Loading it into Chrome
 
