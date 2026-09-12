@@ -144,39 +144,27 @@ gated one while checking nothing — which is why the line is here rather than a
 `--load-extension`: in branded Chrome that flag fails silently, with one line in a log and an
 empty extensions page.
 
-## Quickstart — from a clean clone to a browser that talks
+## Quickstart — for somebody who has the repository and nothing else
 
-Four commands and two clicks, in order, on a machine that has `node` 20 or newer and `git`.
-Written for somebody who has never seen this repository and does not intend to trust it.
+A clone, an install and one command, on a machine with `node` 20 or newer and `git`.
+Setting it up for the person
+who will use it is [above](#setting-it-up-once-by-somebody-who-can-see); this is only how to
+get from a clean clone to a loaded extension.
 
 ```sh
 git clone https://github.com/TonyTheCat/spacebar.git
 cd spacebar
 npm install      # installs nothing — there are no dependencies; its one job is core.hooksPath
-npm run verify   # the manifest resolves, every script parses, the tests pass
+npm run verify   # no key, no browser, no network
 ```
 
-`npm run verify` **needs no key, no browser and no network**, which is the point of running it
-first: it answers whether this checkout is whole before Chrome is involved. It is four checks
-and it names each one as it goes — `scripts/check-manifest.mjs` resolves every path
-`manifest.json` names and refuses a vendored script loaded before something that reads it,
-`scripts/check-globals.mjs` refuses a page whose own code uses a global no script on that page
-defines, `scripts/check-syntax.mjs` parses every script the extension loads, and `node --test`
-runs the suite over `src/shared/`. Any one of them failing exits non-zero and names the file.
-The same command is what `.githooks/pre-commit` runs, so what passes here is what was
-committed.
+`npm run verify` is four checks and it names each as it goes: `scripts/check-manifest.mjs`
+resolves every path `manifest.json` names and refuses a vendored script loaded before
+something that reads it, `scripts/check-globals.mjs` refuses a page whose own code uses a
+global no script on that page defines, `scripts/check-syntax.mjs` parses every script the
+extension loads, and `node --test` runs the suite over `src/shared/`. Any one failing exits
+non-zero and names the file. It is what `.githooks/pre-commit` runs, so what passes here is
+what was committed.
 
-Then load it and hand it a key:
-
-1. Open `chrome://extensions`, turn on **Developer mode** (top right), press **Load unpacked**
-   and choose this folder. Not `--load-extension`: in branded Chrome that flag fails silently.
-2. **Right-click the Spacebar icon in the toolbar → *Options*.** Paste an OpenAI key into
-   *The OpenAI key* and press **Save the key**, then press **Check the microphone** and answer
-   Chrome's dialog while you can still see it.
-
-That settings page is the only place a key is ever entered — there is no key field on the
-pinned tab, by design. The two sections below it, the start page and the spoken language, have
-working defaults and can be left alone.
-
-Open a new window: the pinned tab connects by itself and says where you are. Hold the space
-bar on the page, say what you want, let go.
+Then `chrome://extensions` → Developer mode → **Load unpacked** → this folder, and follow
+*Setting it up* above. Not `--load-extension`: in branded Chrome that flag fails silently.
