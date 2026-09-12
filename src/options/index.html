@@ -39,6 +39,21 @@
       <p id="mic-state" class="state" role="status"></p>
     </section>
 
+    <section aria-labelledby="start-title">
+      <h2 id="start-title">3. Where the browser opens</h2>
+      <p>
+        Chrome's own new-tab page is empty for a voice: nothing runs there, so the space bar does
+        nothing. Spacebar opens a real site instead. Leave this empty for Google, or name a site
+        the way you would say it out loud — the same words work when they say "open …".
+      </p>
+      <label class="field">
+        <span>Start page</span>
+        <input id="start" type="text" autocomplete="off" spellcheck="false" placeholder="google" />
+      </label>
+      <button id="save-start" type="button">Save the start page</button>
+      <p id="start-state" class="state" role="status"></p>
+    </section>
+
     <footer>
       <p class="hint">
         Done? Close this tab. Next time Chrome starts, a pinned tab opens on its own and says
@@ -46,6 +61,7 @@
       </p>
     </footer>
 
+    <script src="../shared/known-sites.js"></script>
     <script src="options.js"></script>
   </body>
 </html>

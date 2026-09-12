@@ -1,16 +1,19 @@
 /* Set up once, by somebody who can see the screen.
  *
- * Two things, and neither is done by the person who will use Spacebar every
- * day: the key that the voice session needs, and the microphone dialog that
- * Chrome shows exactly once. Each is saved on its own, with its own line saying
- * what happened, so a helper can do one and come back for the other.
+ * Three things, and none of them is done by the person who will use Spacebar
+ * every day: the key that the voice session needs, the microphone dialog that
+ * Chrome shows exactly once, and the page the browser opens on. Each is saved on
+ * its own, with its own line saying what happened, so a helper can do one and
+ * come back for the rest.
  *
  * Nothing here opens a session or talks to OpenAI. The key goes into
  * chrome.storage.local under `openaiKey`, which is the only place the phone
  * reads it from, and it is never shown back — not even the first characters.
  *
- * This page loads no other script on purpose: a helper must be able to save the
- * key even if everything else in the extension is broken.
+ * The key and the microphone come first in this file and use nothing but the
+ * platform, on purpose: a helper must be able to save the key even if everything
+ * else in the extension is broken. Only the start page reaches for a shared
+ * module, and it does so last.
  */
 
 /** @param {string} id */
@@ -70,4 +73,32 @@ el('mic').addEventListener('click', () => {
     .catch((error) => {
       tell('mic-state', `Chrome said no: ${String(error).slice(0, 120)}`, 'bad');
     });
+});
+
+/* 3. The start page. Shown back, because it is not a secret and a helper wants
+ * to see what is already there. Resolved through the same table `open_site`
+ * uses, so what is typed here is confirmed in the words the person would say.
+ * A name nobody knows is refused rather than saved and quietly turned into
+ * Google later. */
+
+void chrome.storage.local.get('startPage').then(({ startPage }) => {
+  const saved = typeof startPage === 'string' ? startPage : '';
+  input('start').value = saved;
+  tell('start-state', `Opens at ${KnownSites.startPage(saved)}`);
+});
+
+el('save-start').addEventListener('click', () => {
+  const said = input('start').value.trim();
+  if (said && !KnownSites.resolve(said)) {
+    tell(
+      'start-state',
+      `"${said}" is not a site I know, and I will not guess an address. ` +
+        `Try ${KnownSites.names().join(', ')}, or a full address like https://example.com.`,
+      'bad'
+    );
+    return;
+  }
+  void chrome.storage.local.set({ startPage: said }).then(() => {
+    tell('start-state', `Saved. Opens at ${KnownSites.startPage(said)}`, 'good');
+  });
 });
