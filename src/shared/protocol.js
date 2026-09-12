@@ -53,6 +53,38 @@
  * @property {number} [at]          Date.now() of the scan.
  */
 
+/**
+ * What the ISOLATED content script answers a PT.READ_REQUEST with.
+ *
+ * ALREADY SHAPED, and that is the decision this typedef exists to record. Choosing between
+ * reading a page as a list of results and reading it as prose needs the DOM in front of you —
+ * it is two or more repeating blocks or it is not — so the content script makes it, handing
+ * the hands brick our own Readable.results and Readable.shape as its two ways of saying it.
+ * The phone receives a sentence, not parts to assemble. Shaping it again at this end would be
+ * one half guessing at a decision the other half already made with the evidence.
+ *
+ * @typedef {object} ReadResult
+ * @property {string} text        The page, in words, ready to be said.
+ * @property {number} [results]   How many results were read, when it was a page of results.
+ * @property {number} [of]        How many the page has, when there were more than were read.
+ * @property {string} [error]     Why there is nothing, in words. NOT the same as an empty page.
+ */
+
+/**
+ * What the ISOLATED content script answers a PT.EXECUTE_REQUEST or PT.FILL_REQUEST with.
+ *
+ * `ok` is whether the press HAPPENED. `problems` is what the PAGE said about it afterwards, in
+ * the page's own words — pressed and accepted are different facts, and a form is exactly where
+ * they differ. Without the second the phone can only report its own press, which is how
+ * somebody hears "submitted" about a form the page refused.
+ *
+ * @typedef {object} ExecResult
+ * @property {boolean} ok
+ * @property {string} text          What changed on the page, in words.
+ * @property {boolean} [done]
+ * @property {string[]} [problems]  The page's own complaints, if it made any.
+ */
+
 // eslint-disable-next-line no-unused-vars
 const PT = {
   /** Stamped on every window.postMessage between the MAIN and ISOLATED worlds. Both ends also

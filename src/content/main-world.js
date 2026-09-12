@@ -9,6 +9,14 @@
  * adding a script at document_start to a manifest that is already loading pages — a change
  * that is much easier to get wrong than to have made at the beginning.
  *
+ * IT RUNS IN THE TOP FRAME ONLY, while the ISOLATED half runs in every frame. The asymmetry
+ * is deliberate and it is two separate decisions. What lives here is `document.modelContext`,
+ * which a SITE declares for its page — an advert in an iframe declaring tools is not the page
+ * offering them, and acting on one would be acting on a third party's markup. The ISOLATED
+ * half runs everywhere because the talk key has to work wherever the person's focus happens
+ * to be, which is a per-frame fact. If something is ever added here that genuinely belongs in
+ * subframes, that is the moment to change the flag, and this is the line to change with it.
+ *
  * Two rules hold for anything that is added here, and they are the reason this file is not
  * just an empty listener with no comment. Every message is stamped with PT.CHANNEL, and every
  * handler checks `event.source === window` — window.postMessage is delivered to the page, so
