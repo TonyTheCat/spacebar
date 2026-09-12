@@ -966,7 +966,8 @@ const waitForThePage = async (tabId, wasAt = '', ms = PAGE_LOAD_MS) => {
 
 /** Put a page in front of the person. @param {string} said */
 const openSite = async (said) => {
-  const where = KnownSites.resolve(said) ?? KnownSites.searchFor(said);
+  const known = KnownSites.resolve(said);
+  const where = known ?? KnownSites.searchFor(said);
   if (!where) {
     return { ok: false, text: `I did not understand "${said}" as somewhere to go.` };
   }
@@ -1007,7 +1008,28 @@ const openSite = async (said) => {
 
   const settled = await waitForThePage(id, wasAt);
   const scan = await readThePageAndPublish('a new page');
-  const here = Orientation.arrived(scan?.title, scan?.url ?? where);
+
+  /* SAY WHICH OF THE TWO THINGS HAPPENED.
+   *
+   * "the social security office" is not a site we know, so it becomes a web search — which is
+   * the right action and was already what happened. What was wrong is the sentence: the answer
+   * said "You're on duckduckgo.com", so somebody who asked for a specific place, and cannot
+   * look at the screen, was handed the name of a search engine instead of an answer. They have
+   * no way to tell that from having been taken to the wrong site.
+   *
+   * So a search says it is a search, in their own words, and the count of what came back is
+   * the part that makes it useful rather than merely honest. */
+  let here = Orientation.arrived(scan?.title, scan?.url ?? where);
+  if (!known) {
+    /* The count comes from READING the page, not from the scan: a scan counts TOOLS, and the
+     * synthesizer's stats have nothing to say about how many results are on screen. Guessing
+     * that they did would be this half inventing a number, which is the one thing a person who
+     * cannot look must be able to trust. One read, on a page we have just waited for. */
+    const page = await askUntilItAnswers(id, { type: PT.READ_REQUEST }, 'the read');
+    const count = AfterTheAction.onScreen(page?.results, page?.of);
+    here = `I did not know "${said}", so I searched the web for it. ${count}`.trim();
+  }
+
   return {
     ok: true,
     text:
