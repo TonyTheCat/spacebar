@@ -243,6 +243,11 @@ const speak = (text, priority) => {
 
 /* ================================== the gate ================================== */
 
+/** How long to wait for the extension to answer a confirmation before calling it unanswered.
+ *
+ *  A refusal, not a press: whatever happens after this deadline, nothing has been agreed to. */
+const CONFIRM_WAIT_MS = 5000;
+
 /** Ask the person, through whichever half of the extension asked for this action, before
  *  doing something irreversible.
  *
@@ -283,9 +288,27 @@ const confirmWith = (askedBy) => async (label, steps) => {
     'high'
   );
 
-  const answer = await chrome.runtime
-    .sendMessage({ type: PT.CONFIRM_REQUEST, label, steps, askedBy })
-    .catch(() => null);
+  /* Bounded, because an unbounded await here is a gate that HANGS.
+   *
+   * A listener that returns true — claiming it will answer later — and then does not leaves
+   * this promise unsettled for ever. The model waits, nothing is pressed, nothing is said, and
+   * somebody who has just agreed out loud hears silence. That is worse than a refusal, and it
+   * is the failure class this product has met twice already: a step that can fail without
+   * leaving a line.
+   *
+   * Five seconds is a message hop with room to spare. The person's yes was given BEFORE the
+   * page was asked to press, so nobody is waiting on a human here.
+   *
+   * Not src/shared/one-wait.js, deliberately, though it is the same shape: this file is
+   * injected into EVERY page, and adding a script to that list for one deadline costs a parse
+   * on every page load and one more thing the manifest can get wrong. The two lines below are
+   * the whole of what would be imported. */
+  const answer = await Promise.race([
+    chrome.runtime
+      .sendMessage({ type: PT.CONFIRM_REQUEST, label, steps, askedBy })
+      .catch(() => null),
+    new Promise((resolve) => setTimeout(() => resolve(null), CONFIRM_WAIT_MS)),
+  ]);
   /* Nobody listening is still a refusal — a missing answer must never read as consent, which
    * is the direction this whole product leans. But it is not the PERSON'S refusal, and saying
    * it is would be the machine reporting its own silence as somebody else's decision. */
