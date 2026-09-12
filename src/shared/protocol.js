@@ -155,13 +155,23 @@ const PT = {
   /** Anything worth a line in the phone's own diary. */
   STEP: 'step',
 
-  /** ISOLATED <-> MAIN, over window.postMessage: the tools the SITE declares for itself. */
+  /** ISOLATED <-> MAIN, over window.postMessage: the tools the SITE declares for itself.
+   *
+   * NOTHING SENDS THESE AND NOTHING ANSWERS THEM. They are names waiting for a path that has
+   * not been built: main-world.js listens and replies to nothing, isolated.js never asks, and
+   * no scan carries a declared list. Said here because the earlier version of this comment
+   * described the wire as if it ran, and a name in a protocol file reads as a thing that
+   * exists.
+   *
+   * The one piece that IS built is the rule about them: gating.js insists that a tool a SITE
+   * declared is put to the person out loud, whatever the tool says about itself, because
+   * WebMCP carries no statement of consequence. That rule is tested and has never fired,
+   * because nothing yet produces a tool with source 'declared'. */
   DECLARED_REQUEST: 'declared-request',
   DECLARED_RESULT: 'declared-result',
 
-  /** How long the ISOLATED world waits for the MAIN world before deciding the page declares
-   *  nothing. The MAIN script answers synchronously in practice; this only bounds the case
-   *  where it never loaded at all. */
+  /** How long the ISOLATED world would wait for the MAIN world before deciding the page
+   *  declares nothing — for the path above, when it is built. */
   MAIN_WORLD_TIMEOUT_MS: 1500,
 
   /** Where a scan is left for anyone who wants to read it. chrome.storage.local, one key. */

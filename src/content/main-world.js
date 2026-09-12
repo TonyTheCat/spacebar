@@ -4,10 +4,20 @@
  * `document.modelContext`, the tools a page DECLARES for an agent rather than the ones we read
  * off its markup. The ISOLATED world cannot see it: that is what world isolation is for.
  *
- * Today it answers nothing. It is wired from the first commit anyway, and deliberately: the
- * pair of worlds is the shape of this content layer, and adding the second one later means
- * adding a script at document_start to a manifest that is already loading pages — a change
- * that is much easier to get wrong than to have made at the beginning.
+ * NOTHING HERE READS IT, AND NOTHING ANYWHERE ELSE DOES EITHER. That sentence is the whole
+ * point of this paragraph, because the one it replaced said this file was "wired" and left a
+ * reader — including the person who wrote it — believing the declared path existed and was
+ * merely quiet. It does not exist: this file has an empty listener, isolated.js never asks the
+ * MAIN world anything, no scan carries a `declared` field, and the phone publishes only the
+ * tools the synthesizer reads off the markup.
+ *
+ * One half IS real and is worth knowing about: gating.js treats a tool with source 'declared'
+ * as something that must be put to the person out loud, and that rule has a test. Nothing
+ * produces such a tool yet, so the rule has never fired in a live session.
+ *
+ * The file is here for the SHAPE rather than for what it does: adding a MAIN-world script at
+ * document_start to a manifest that is already loading pages is much easier to get wrong later
+ * than to have in place from the start.
  *
  * IT RUNS IN THE TOP FRAME ONLY, while the ISOLATED half runs in every frame. The asymmetry
  * is deliberate and it is two separate decisions. What lives here is `document.modelContext`,
