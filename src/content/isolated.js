@@ -123,12 +123,17 @@ const synthesize = () => {
  * the other end cannot see the screen to tell which it was.
  *
  * @returns {object} a Scan, as described in src/shared/protocol.js */
-const scanThisPage = () => {
+const scanThisPage = async () => {
+  /* Asked FIRST and awaited, because the two halves answer different questions and the answer
+   * to ours does not depend on theirs: a site's own declaration is authoritative about what it
+   * wants an agent to do, and what we read off the markup is our reading of it. */
+  const declared = await readDeclared();
   try {
     const { tools, stats } = synthesize();
     return {
       url: location.href,
       title: document.title,
+      declared,
       synthesized: tools,
       stats,
       readable: true,
@@ -138,6 +143,7 @@ const scanThisPage = () => {
     return {
       url: location.href,
       title: document.title,
+      declared,
       synthesized: [],
       readable: false,
       error: `scanning this page threw: ${String(error).slice(0, 200)}`,
@@ -240,6 +246,74 @@ const speak = (text, priority) => {
   }
   return null;
 };
+
+/* ============================ asking the MAIN world ============================ */
+
+/* A site's OWN tools live in the page's world, not ours, and this is the only wire to them.
+ *
+ * Everything that comes back is the PAGE'S OWN WORDS: names, descriptions and schemas written
+ * by whoever wrote the site. It is relayed, never believed — the gate treats every declared
+ * tool as something the person must be asked about out loud, precisely because WebMCP says
+ * nothing about whether calling one reads or changes.
+ */
+
+let nextAsk = 1;
+/** @type {Map<number, (value: any) => void>} */
+const waitingOnMain = new Map();
+
+window.addEventListener('message', (event) => {
+  // Same window, our channel, and only answers — a question is ours going out, not theirs
+  // coming back.
+  if (event.source !== window) return;
+  const message = event.data;
+  if (!message || message.channel !== PT.CHANNEL || message.from !== 'main') return;
+
+  if (message.type === PT.DECLARED_RESULT || message.type === PT.DECLARED_EXECUTE_RESULT) {
+    const settle = waitingOnMain.get(message.id);
+    if (settle) {
+      waitingOnMain.delete(message.id);
+      settle(message.type === PT.DECLARED_RESULT ? message.declared : message.result);
+      return;
+    }
+    /* No id, or an id nobody is waiting for: the page's tool set changed on its own. Nothing
+     * here reacts to it — the phone republishes on its own events — but it is not an error
+     * either, and treating it as one would fill a log with a page doing its job. */
+  }
+});
+
+/** Ask the MAIN world something, bounded.
+ *
+ * A page that never answers — no MAIN script because a CSP blocked it, an API that hangs — must
+ * not hold up a scan. The fallback is a REPORT rather than silence: "we could not ask" and "the
+ * page declares nothing" are different facts, and only one of them is about the page.
+ *
+ * @param {string} type @param {object} payload @param {any} fallback */
+const askMainWorld = (type, payload, fallback) =>
+  new Promise((resolve) => {
+    const id = nextAsk++;
+    const timer = setTimeout(() => {
+      waitingOnMain.delete(id);
+      resolve(fallback);
+    }, PT.MAIN_WORLD_TIMEOUT_MS);
+    waitingOnMain.set(id, (value) => {
+      clearTimeout(timer);
+      resolve(value);
+    });
+    window.postMessage({ channel: PT.CHANNEL, from: 'isolated', type, id, ...payload }, '*');
+  });
+
+/** What this page declares for itself. @returns {Promise<object>} */
+const readDeclared = () =>
+  askMainWorld(
+    PT.DECLARED_REQUEST,
+    {},
+    {
+      available: false,
+      where: null,
+      tools: [],
+      reason: 'The page script never answered — it may have been blocked by the page.',
+    }
+  );
 
 /* ================================== the gate ================================== */
 
@@ -645,13 +719,34 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message?.type === PT.SCAN_REQUEST) {
-    // Synchronous: the scan is this document, and scanThisPage answers with readable: false
-    // rather than throwing.
-    sendResponse(scanThisPage());
-    return false;
+    /* Kept open: the scan now waits on the page's own world for what the site declares, which
+     * is bounded by PT.MAIN_WORLD_TIMEOUT_MS and answers with a report either way. */
+    scanThisPage()
+      .catch((error) => ({
+        url: location.href,
+        title: document.title,
+        synthesized: [],
+        readable: false,
+        error: `scanning this page threw: ${String(error).slice(0, 200)}`,
+        at: Date.now(),
+      }))
+      .then(sendResponse);
+    return true;
   }
 
   if (message?.type === PT.EXECUTE_REQUEST) {
+    /* A tool the SITE declared cannot run the way ours do: the page's own function is reachable
+     * only from the page's own world, so it goes over the same wire the declaration came back
+     * on. The gate does not change — gating.js asks the person out loud about every declared
+     * tool, because WebMCP says nothing about consequence. */
+    if (message.source === 'declared') {
+      askMainWorld(
+        PT.DECLARED_EXECUTE_REQUEST,
+        { name: message.name, args: message.args ?? {} },
+        { ok: false, text: 'The page script never answered.' }
+      ).then(sendResponse);
+      return true;
+    }
     execute(message.name, message.args ?? {}, confirmWith(message.askedBy))
       .catch((error) => ({
         ok: false,
