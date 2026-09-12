@@ -254,8 +254,12 @@ const onServerEvent = (message) => {
     if (accepted && ToolsAck.answers(accepted.names, names)) {
       accepted.wait.settled();
       accepted = null;
+      // Now we KNOW what it holds, by its own word. The only place that may say so.
+      heldBySession = names;
     } else if (accepted) {
       log('that was an acknowledgement of another list — still waiting for ours');
+      // And we no longer know what it is holding, so nothing may be skipped on that belief.
+      heldBySession = null;
     }
   }
 
@@ -371,6 +375,8 @@ const openTheLine = async () => {
    * that produces one baffling turn nobody can reproduce. */
   turn.clear();
   answerWasCutOff = false;
+  // A new session holds nothing, whatever the last one had taken.
+  heldBySession = null;
 
   /* The key comes from the settings page, never from here. It used to be a password field on
    * this surface — the one screen a blind person uses every day, asking them to type a secret
@@ -533,6 +539,10 @@ let heardAt = 0;
  *  because what matters is that the LAST list sent has been taken.
  *  @type {{names: string[], wait: ReturnType<typeof OneWait.create>}|null} */
 let accepted = null;
+
+/** What the session itself says it is holding. Only its own acknowledgement may set this: our
+ *  belief about what we sent is not evidence about what it took. @type {string[]|null} */
+let heldBySession = null;
 
 /** The schema of each tool currently on offer, by name. Kept so that what is read back at the
  *  gate can be masked by the same rules the schema declares — a password is named, never said. */
@@ -725,6 +735,22 @@ const toolsOf = (scan) => {
  *  @param {object[]} tools @param {string} why @returns {Promise<boolean>} accepted? */
 const handToTheSession = async (tools, why) => {
   const names = tools.map((tool) => String(tool.name));
+
+  /* A list the session already HOLDS is not sent again.
+   *
+   * Not tidiness: every publish is a session.update the session has to take in order, and one
+   * action produces two of them — the tab finishing its load, and the action's own republish.
+   * The second arrives while the first is still being acknowledged, and then "was my list
+   * accepted?" has two answers in flight for the same question, which is the race the whole
+   * ToolsAck correlation exists to settle.
+   *
+   * Only when it is the SAME list, by the session's own word about what it holds — and it is
+   * said out loud in the log as KEPT. A list quietly not sent looks exactly like a list that
+   * was dropped, and those mean opposite things to whoever is reading the feed afterwards. */
+  if (heldBySession && ToolsAck.answers(heldBySession, names)) {
+    log(`the session already holds these ${names.length} tools — KEPT, not sent again (${why})`);
+    return true;
+  }
   // An older wait is finished rather than left for its own deadline: what matters is that the
   // LAST list sent has been accepted.
   accepted?.wait.giveUp();
@@ -739,6 +765,7 @@ const handToTheSession = async (tools, why) => {
   if (how === 'timed out') log('the session never acknowledged that list — answering anyway');
   return how === 'settled';
 };
+
 
 /** One fallback, once per phone: somewhere real to start.
  *
@@ -987,16 +1014,33 @@ const runOnThePage = async (name, args, tool) => {
   const wentSomewhere = Boolean(now && wasAt && now.url && now.url !== wasAt);
   await readThePageAndPublish('after an action');
 
-  if (result && result !== 'timed out') return ToolResult.capped(result);
+  /* The page side answers `moved: true` when it wins its own race with pagehide — it pressed,
+   * and the page is going. ToolResult.capped keeps only ok and text, so it is read here, off
+   * the raw answer, before anything trims it. */
+  const itSaysItMoved = Boolean(result && typeof result === 'object' && result.moved === true);
+  if (result && result !== 'timed out' && !itSaysItMoved) return ToolResult.capped(result);
 
-  if (wentSomewhere || moved === 'settled') {
+  if (itSaysItMoved || wentSomewhere || moved === 'settled') {
     /* The port died because the page went away, which is the press working. Said as DONE, with
      * where they are now and an instruction not to do it again: a model told "I do not know"
      * about something that happened will helpfully try it a second time. */
-    log(`${name}: the port closed because the page moved — it went through`);
+    log(`${name}: the page moved — it went through`);
+    /* And how many things are on the page now.
+     *
+     * A count is what tells somebody who cannot see the screen that the page in front of them
+     * IS the answer to what they asked: "nine results" cannot be mistaken for a page that did
+     * not load. It costs one read, on a page we have just waited for. */
+    const page = now?.id === undefined ? null : await askUntilItAnswers(now.id, { type: PT.READ_REQUEST }, 'the read');
+    const count = AfterTheAction.onScreen(page?.results, page?.of);
     return {
       ok: true,
-      text: `${AfterTheAction.wentThrough(name, Consent.written(args, schemasInPlay.get(name)))} ${Orientation.arrived(now?.title, now?.url)}`,
+      text: [
+        AfterTheAction.wentThrough(name, Consent.written(args, schemasInPlay.get(name))),
+        count,
+        Orientation.arrived(now?.title, now?.url),
+      ]
+        .filter(Boolean)
+        .join(' '),
     };
   }
 
