@@ -37,12 +37,22 @@ const ToolResult = {
    */
   capped(result, limit = RESULT_LIMIT) {
     const text = String(result?.text ?? '');
-    // ok is normalised to a real boolean here as well: this value is read by
-    // the caller to decide what to tell the person, and a truthy string that
-    // means "failed" would be read as success.
-    if (text.length <= limit) return { ok: result?.ok === true, text };
-    return {
+    /* Everything the answer came with, with only the text cut.
+     *
+     * This used to rebuild the object out of ok and text alone, which quietly dropped every
+     * other field the page side had sent: `problems`, the page's own complaints about what it
+     * refused, and `moved`, which says the press went through and took the page with it. Both
+     * exist to be acted on, and a field nobody can see is a field nobody can act on.
+     *
+     * ok is still normalised to a real boolean: the caller reads it to decide what to tell the
+     * person, and a truthy string meaning "failed" would be read as success. */
+    const whole = {
+      ...(result && typeof result === 'object' ? result : {}),
       ok: result?.ok === true,
+    };
+    if (text.length <= limit) return { ...whole, text };
+    return {
+      ...whole,
       text: `${text.slice(0, limit)}\n[cut here — this answer was longer than the line allows]`,
     };
   },
