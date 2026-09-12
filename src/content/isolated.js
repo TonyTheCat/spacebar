@@ -257,8 +257,14 @@ const speak = (text, priority) => {
  * that. This side says the question through the page as well, for a screen reader that is
  * following the document rather than our tab, and then asks and waits.
  *
+ * It answers with WHICH of the three happened rather than with a boolean, because two of them
+ * are refusals and only one of them is the person's. Somebody agreed to a search, nothing in
+ * the extension answered this question, and the product told them they had declined — which is
+ * worse than the failure it was reporting: it put words in their mouth. Nothing is pressed in
+ * either case; only the sentence differs.
+ *
  * @param {string|undefined} askedBy
- * @returns {(label: string, steps: string[]) => Promise<boolean>} */
+ * @returns {(label: string, steps: string[]) => Promise<'yes'|'no'|'nobody answered'>} */
 const confirmWith = (askedBy) => async (label, steps) => {
   /* Said before it is asked, and said HERE.
    *
@@ -280,13 +286,11 @@ const confirmWith = (askedBy) => async (label, steps) => {
   const answer = await chrome.runtime
     .sendMessage({ type: PT.CONFIRM_REQUEST, label, steps, askedBy })
     .catch(() => null);
-  /* Nobody listening is a NO.
-   *
-   * Every way of not getting an answer lands here — no phone open, a phone that dropped its
-   * line, a request nobody claims as their own — and all of them mean the same thing: no
-   * person said yes. A missing answer must never read as consent, which is the direction
-   * this whole product leans. */
-  return answer?.ok === true;
+  /* Nobody listening is still a refusal — a missing answer must never read as consent, which
+   * is the direction this whole product leans. But it is not the PERSON'S refusal, and saying
+   * it is would be the machine reporting its own silence as somebody else's decision. */
+  if (answer?.ok === true) return 'yes';
+  return answer && typeof answer === 'object' ? 'no' : 'nobody answered';
 };
 
 /* ============================== running one tool ============================== */
@@ -299,7 +303,7 @@ const confirmWith = (askedBy) => async (label, steps) => {
  *
  * @param {string} name
  * @param {Record<string, unknown>} args
- * @param {(label: string, steps: string[]) => Promise<boolean>} confirm
+ * @param {(label: string, steps: string[]) => Promise<'yes'|'no'|'nobody answered'>} confirm
  * @returns {Promise<{ok: boolean, text: string, problems?: unknown}>} */
 const execute = async (name, args, confirm) => {
   const ref = refs.get(name);
@@ -455,11 +459,27 @@ const execute = async (name, args, confirm) => {
       };
     }
 
-    if (mustAsk && !(await confirm(label, steps))) {
-      return {
-        ok: false,
-        text: `The human declined to press "${label}". The fields are left as they are.`,
-      };
+    if (mustAsk) {
+      const said = await confirm(label, steps);
+      if (said === 'no') {
+        return {
+          ok: false,
+          text: `The human declined to press "${label}". The fields are left as they are.`,
+        };
+      }
+      if (said === 'nobody answered') {
+        /* Said as what it is. The person may well have agreed — the last time this happened
+         * they had — and the honest report is that the question reached nobody, not that they
+         * refused. The fields stay filled either way, so a yes can still be acted on once
+         * whatever should have answered is listening. */
+        return {
+          ok: false,
+          text:
+            `Nothing answered the confirmation for "${label}", so it was not pressed. Do not ` +
+            'say they declined — nobody was asked. Tell them the confirmation did not reach ' +
+            'anything, and that the form is filled in but not sent.',
+        };
+      }
     }
 
     ref.submit?.scrollIntoView({ block: 'center' });
