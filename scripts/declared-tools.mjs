@@ -165,7 +165,15 @@ const fromThePhone = phone
         parkedAnswer: declaredTool
           ? await runOnThePage('delete_all_notes', { sure: 'yes' }, declaredTool)
           : null,
-        pageSaysAfterTheAsk: null,
+        /* AND THEN THE PRESS. The gate always intercepts a declared tool, so without this the
+         * confirmed round trip — the one that actually carries source 'declared' to the page's
+         * own world — is never exercised at all, and the reviewer was right to say so. Their
+         * own words say yes, and the page's own function must run. */
+        pressedAfterYes: await (async () => {
+          lastHeardFromPerson = 'yes please';
+          heardAt = Date.now();
+          return pressWhatWasParked();
+        })(),
       };
     }, FIXTURE)
   : { error: 'no phone tab' };
@@ -185,7 +193,10 @@ if (fromThePhone?.scanCarriesDeclared !== 2) problems.push(`the scan did not car
 if (!(fromThePhone?.offeredNames ?? []).includes('delete_all_notes')) problems.push(`the phone did not offer the site's own tools: ${(fromThePhone?.offeredNames ?? []).join(', ')}`);
 if ((fromThePhone?.gatedByTheRule ?? []).some((gated) => gated !== true)) problems.push('a declared tool was not treated as must-ask');
 if (fromThePhone?.parkedAnswer?.ok !== false || !/shall I\?/.test(fromThePhone?.parkedAnswer?.text ?? '')) problems.push(`calling a declared tool must ask first, not run: ${fromThePhone?.parkedAnswer?.text}`);
-if (pageAfter === 'deleted') problems.push('the page ran an irreversible declared tool that was never agreed to');
+if (fromThePhone?.pressedAfterYes?.ok !== true || !/all notes deleted/.test(fromThePhone?.pressedAfterYes?.text ?? '')) {
+  problems.push(`after a real yes, a declared tool must reach the page's own function: ${fromThePhone?.pressedAfterYes?.text}`);
+}
+if (pageAfter !== 'deleted') problems.push(`the page itself did not run the confirmed declared tool: ${pageAfter}`);
 
 await ctx.close().catch(() => {});
 rmSync(profile, { recursive: true, force: true });
