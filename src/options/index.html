@@ -54,6 +54,29 @@
       <p id="start-state" class="state" role="status"></p>
     </section>
 
+    <section aria-labelledby="language-title">
+      <h2 id="language-title">4. The language they speak</h2>
+      <p>
+        Pick the language the person actually speaks. Left to guess, transcription can hear
+        English as something else, and the errand goes the wrong way with nothing to say why.
+        English if you leave it alone.
+      </p>
+      <label class="field">
+        <span>Spoken language</span>
+        <input
+          id="language"
+          type="text"
+          list="languages"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="en"
+        />
+      </label>
+      <datalist id="languages"></datalist>
+      <button id="save-language" type="button">Save the language</button>
+      <p id="language-state" class="state" role="status"></p>
+    </section>
+
     <footer>
       <p class="hint">
         Done? Close this tab. Next time Chrome starts, a pinned tab opens on its own and says
@@ -62,6 +85,7 @@
     </footer>
 
     <script src="../shared/known-sites.js"></script>
+    <script src="../shared/spoken-language.js"></script>
     <script src="options.js"></script>
   </body>
 </html>

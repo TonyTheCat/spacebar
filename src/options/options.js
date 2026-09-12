@@ -1,10 +1,10 @@
 /* Set up once, by somebody who can see the screen.
  *
- * Three things, and none of them is done by the person who will use Spacebar
+ * Four things, and none of them is done by the person who will use Spacebar
  * every day: the key that the voice session needs, the microphone dialog that
- * Chrome shows exactly once, and the page the browser opens on. Each is saved on
- * its own, with its own line saying what happened, so a helper can do one and
- * come back for the rest.
+ * Chrome shows exactly once, the page the browser opens on, and the language
+ * that gets transcribed. Each is saved on its own, with its own line saying
+ * what happened, so a helper can do one and come back for the rest.
  *
  * Nothing here opens a session or talks to OpenAI. The key goes into
  * chrome.storage.local under `openaiKey`, which is the only place the phone
@@ -12,8 +12,8 @@
  *
  * The key and the microphone come first in this file and use nothing but the
  * platform, on purpose: a helper must be able to save the key even if everything
- * else in the extension is broken. Only the start page reaches for a shared
- * module, and it does so last.
+ * else in the extension is broken. Only the start page and the language reach
+ * for a shared module, and they do so last.
  */
 
 /** @param {string} id */
@@ -100,5 +100,44 @@ el('save-start').addEventListener('click', () => {
   }
   void chrome.storage.local.set({ startPage: said }).then(() => {
     tell('start-state', `Saved. Opens at ${KnownSites.startPage(said)}`, 'good');
+  });
+});
+
+/* 4. The language. A short list is offered; anything shaped like a language tag
+ * is accepted. What is refused is a tag that would silently become English —
+ * that is the same as no setting, and the one person who can fix it is typing.
+ * The list is filled in once storage has answered, so nothing here runs at load
+ * outside a callback. */
+
+void chrome.storage.local.get('spokenLanguage').then(({ spokenLanguage }) => {
+  for (const { tag, name } of SpokenLanguage.offered()) {
+    const option = document.createElement('option');
+    option.value = tag;
+    option.label = name;
+    el('languages').appendChild(option);
+  }
+  const saved = typeof spokenLanguage === 'string' ? spokenLanguage : '';
+  input('language').value = saved;
+  const tag = SpokenLanguage.of(saved);
+  tell('language-state', `Transcribing as ${SpokenLanguage.nameOf(tag)} (${tag})`);
+});
+
+el('save-language').addEventListener('click', () => {
+  const said = input('language').value.trim();
+  if (!SpokenLanguage.usable(said)) {
+    const offered = SpokenLanguage.offered()
+      .map((one) => `${one.tag} for ${one.name}`)
+      .join(', ');
+    tell(
+      'language-state',
+      `"${said}" is not shaped like a language tag and would quietly become English. ` +
+        `Use two letters — ${offered} — or a tag like pt-BR.`,
+      'bad'
+    );
+    return;
+  }
+  void chrome.storage.local.set({ spokenLanguage: said }).then(() => {
+    const tag = SpokenLanguage.of(said);
+    tell('language-state', `Saved. Transcribing as ${SpokenLanguage.nameOf(tag)} (${tag})`, 'good');
   });
 });
