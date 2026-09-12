@@ -86,34 +86,34 @@ const sayOutLoud = (said) => {
   const line = VoiceLines.find(said);
   log(`said out loud: "${text}"`);
 
-  /* Once, however many ways the recording fails. A broken file can fire both an error event
-   * and a rejected play(), and speechSynthesis QUEUES rather than replaces — so without this
-   * the person hears the same sentence twice, at the moment something has just gone wrong. */
-  let spoken = false;
-  const speak = () => {
-    if (spoken) return;
-    spoken = true;
-    try {
-      speechSynthesis.speak(new SpeechSynthesisUtterance(text));
-    } catch {
-      // No synthesis either. The line is in the log, and that is all there is.
-    }
-  };
-
+  /* THE RECORDINGS ARE THE VOICE NOW, and there is no falling back to the browser's own.
+   *
+   * @anton's ruling, once every line of the table had a clip: speechSynthesis was described by
+   * the first person to hear it as shrill, and these sentences arrive at the worst moments —
+   * no key, a dropped line, a hold that ran too long. The rule it replaces said being shrill
+   * beats being silent, and that was true while three lines had no recording. They all have
+   * one.
+   *
+   * What that buys is one voice. What it costs is that a line with no clip is now SILENT, and
+   * silence is the failure this product can least afford — so it is made loud in the log
+   * instead, where a test catches it before a person does. test/voice-lines.test.mjs holds
+   * that gate: every line of the table has a file in assets/voice, checked on every commit.
+   *
+   * A raw string reaches here only if somebody adds one; there are none left. */
   if (!line) {
-    speak();
+    log(`NO CLIP for "${text}" — nothing was said out loud. Every spoken line needs one.`);
     return;
   }
   const clip = new Audio(chrome.runtime.getURL(line.file));
-  // The fallback is wired to the FAILURE rather than to a check that the file exists: a file
-  // can be present and unplayable, and a missing recording must never become silence.
   clip.onerror = () => {
-    log(`no recording for "${line.id}" — using the browser's own voice`);
-    speak();
+    log(`NO CLIP for "${line.id}" — the file did not load, so nothing was said out loud.`);
   };
-  clip.play().catch(() => {
-    log(`could not play the recording for "${line.id}" — using the browser's own voice`);
-    speak();
+  clip.play().catch((error) => {
+    /* A file that is present and will not play. The one case nobody has measured is a pinned
+     * tab that has never been interacted with, where a browser may refuse audio outright —
+     * said here in full rather than summarised, because if it ever happens this line is the
+     * only evidence there will be. */
+    log(`NO CLIP for "${line.id}" — it would not play: ${String(error).slice(0, 120)}`);
   });
 };
 
@@ -411,8 +411,12 @@ const openTheLine = async () => {
     /* A refused key is not a broken product, it is a wrong key — and the person who can fix it
      * is the one who typed it. Naming which failure this is turns "nothing works" into an
      * errand somebody can actually run. */
+    /* The status is in the log above, where the helper who can act on it reads it. Out loud it
+     * is a number that means nothing to the person hearing it — and a sentence built around
+     * one can never have a recording, which is what left this the last line in the product
+     * falling back to the browser's voice. */
     if (minted.status === 401 || minted.status === 403) sayOutLoud(VoiceLines.KEY_REFUSED);
-    else sayOutLoud(`I could not start. The service answered ${minted.status}.`);
+    else sayOutLoud(VoiceLines.COULD_NOT_START);
     return false;
   }
   const { value: ephemeral } = await minted.json();
@@ -437,7 +441,7 @@ const openTheLine = async () => {
    * phone's own voice — this is exactly the kind of moment the recorded lines exist for, and
    * the session cannot say it because the session is not up yet. */
   state('waiting for the microphone — allow it in the browser');
-  sayOutLoud('Allow the microphone. Your browser is asking, at the top of the window.');
+  sayOutLoud(VoiceLines.ALLOW_THE_MICROPHONE);
 
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true }).catch((error) => {
     // Silence from here would be indistinguishable from an agent with nothing to say — and

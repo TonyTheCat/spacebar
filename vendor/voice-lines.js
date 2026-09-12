@@ -53,6 +53,21 @@ const LINES = {
     text: 'The key was refused. Ask your helper to check it in the settings.',
     file: 'assets/voice/key-refused.mp3',
   },
+  COULD_NOT_START: {
+    /* The session did not come up, for a reason nobody in the room can act on.
+     *
+     * It was said as "I could not start. The service answered 503." — a sentence built around
+     * a number, which is a sentence that can never have a recording, and a number that means
+     * nothing to the person hearing it. The status belongs in the log, where the helper who
+     * can do something about it reads it; what the person needs is the errand: somebody should
+     * look at the key.
+     *
+     * A fixed wording is what lets this be recorded at all, and with it every sentence the
+     * product says out loud is a line of this table. */
+    id: 'could-not-start',
+    text: 'I could not start. Ask your helper to check the key in settings.',
+    file: 'assets/voice/could-not-start.mp3',
+  },
   ALLOW_THE_MICROPHONE: {
     /* Said while Chrome's own permission dialog is on screen, which is the one moment a
      * blind person has no way of knowing there is anything to answer.
