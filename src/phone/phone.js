@@ -990,15 +990,24 @@ const fillOneField = async (args) => {
 
 /** Run one of the page's own tools, or ask about it first.
  *  @param {string} name @param {object} args @param {Tool|undefined} tool */
-const runOnThePage = async (name, args, tool) => {
+const runOnThePage = async (name, args, tool, knownSchema) => {
   const tab = await findPageTab();
   if (!tab || tab.id === undefined) return { ok: false, text: VoiceLines.NO_PAGE.text };
 
-  /* Held now, while we still have it. Doing the action republishes the page's tools, which
-   * clears this map — and a value whose schema has gone is a value nothing can vouch for, so
-   * it is hidden. Read afterwards, the DONE line came back "search ran with {search: (hidden)}"
-   * about an ordinary search term. The masking rule is right; looking it up too late is not. */
-  const schema = schemasInPlay.get(name);
+  /* The schema this tool was OFFERED with, and nothing later.
+   *
+   * Doing the action republishes the page's tools, which clears this map — so looking it up
+   * afterwards found nothing and the DONE line came back "search ran with {search: (hidden)}"
+   * about an ordinary search term. The masking rule behind that is right and stays: a value no
+   * schema describes is a value nothing can vouch for.
+   *
+   * For a GATED action the gap is wider and worse, which the reviewer caught. Park and press
+   * are two separate turns with a person speaking in between; by then the map can hold a
+   * DIFFERENT page's tool under the same name, whose schema does not mark the password this
+   * one had. Masking would then read a schema that describes something else and print the
+   * secret in full. So a parked action carries the schema it was asked about with, and it is
+   * passed back in here rather than looked up again. */
+  const schema = knownSchema ?? schemasInPlay.get(name);
 
   /* The gate. A tool the page marked as committing something is NOT run: it is parked, and the
    * model is handed the sentence it must say — which contains the values about to be sent, so
@@ -1113,7 +1122,7 @@ const pressWhatWasParked = async () => {
   // The page will ask the extension to confirm this press before it runs it. This is the one
   // press that may be answered yes, and it is answered yes exactly once.
   pressToken = { name: doIt.name, at: Date.now() };
-  const pressed = await runOnThePage(doIt.name, doIt.args, undefined);
+  const pressed = await runOnThePage(doIt.name, doIt.args, undefined, doIt.schema);
   // Whatever happened, the token does not outlive the press it was minted for.
   pressToken = null;
   return pressed;
