@@ -41,10 +41,25 @@ const tell = (id, text, tone) => {
  * character can be seen before it is saved. It does not reveal a saved key:
  * saving clears the field, and nothing reads the key back onto this page. */
 
-void chrome.storage.local.get('openaiKey').then(({ openaiKey }) => {
-  const set = typeof openaiKey === 'string' && openaiKey.length > 0;
+/** Everything on this page that says whether a key exists, in one place, so
+ *  the field, the Remove button and the line can never disagree.
+ *  @param {boolean} set */
+const keyIs = (set) => {
+  input('key').placeholder = set ? 'A key is saved — type a new one to replace it' : 'sk-…';
+  el('remove-key').hidden = !set;
   if (set) tell('key-state', 'A key is saved. Type a new one only to replace it.', 'good');
   else tell('key-state', 'No key yet — Spacebar stays silent until there is one.', 'info');
+};
+
+void chrome.storage.local.get('openaiKey').then(({ openaiKey }) => {
+  keyIs(typeof openaiKey === 'string' && openaiKey.length > 0);
+});
+
+el('remove-key').addEventListener('click', () => {
+  void chrome.storage.local.remove('openaiKey').then(() => {
+    keyIs(false);
+    tell('key-state', 'The key is gone. Spacebar stays silent until a new one is saved.', 'info');
+  });
 });
 
 /** @param {boolean} shown */
@@ -69,6 +84,7 @@ el('save').addEventListener('click', () => {
   void chrome.storage.local.set({ openaiKey: key }).then(() => {
     input('key').value = '';
     showKey(false);
+    keyIs(true);
     tell('key-state', 'Saved. Spacebar connects by itself from now on.', 'good');
   });
 });

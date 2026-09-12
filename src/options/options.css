@@ -130,6 +130,19 @@ button {
   color: inherit;
   cursor: pointer;
 }
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+button.quiet {
+  border-color: transparent;
+  color: var(--muted);
+}
+button.quiet:hover {
+  color: var(--bad);
+  border-color: var(--line);
+}
 .state {
   min-height: 1.6em;
   margin: 0.6rem 0 0;
