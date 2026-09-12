@@ -93,17 +93,22 @@ lists it. A whole form in one breath is more than the model will fill.
 
 ### What it says when something is wrong
 
-These are the phone's own sentences, recorded in advance (`vendor/voice-lines.js`), so they
-sound the same every time — including the times when the session itself is what has broken:
+These are the phone's own sentences — ten of them, each recorded in advance and played from
+the recording, so they sound the same every time, including the times when the session itself
+is what has broken. The texts below are the ones in `vendor/voice-lines.js`, which is what the
+recordings were made from; there is no browser voice behind them any more, so a line with no
+clip is written to the log as `NO CLIP` rather than spoken shrill:
 
 | when | it says |
 |---|---|
-| no key saved yet | *Page Tools is not set up yet. Ask your helper to enter the key in its settings.* |
+| no key saved yet | *Spacebar is not set up yet. Ask your helper to add the key in settings.* |
+| it could not start with the key it has | *I could not start. Ask your helper to check the key in settings.* |
 | the key was rejected | *The key was refused. Ask your helper to check it in the settings.* |
+| Chrome is asking for the microphone | *Allow the microphone. Your browser is asking, at the top of the window.* |
+| the microphone is blocked | *I can't hear you. The microphone is not allowed for this browser.* |
 | connected | *Ready. Hold the space bar and tell me what you want.* |
 | the connection dropped | *The connection dropped. Reconnecting.* |
 | it could not come back | *I could not get the connection back. Press Connect to try again.* |
-| the microphone is blocked | *I can't hear you. The microphone is not allowed for this browser.* |
 | no page to work on | *There is no page open for me to work on. Open a site and try again.* |
 | the key was held too long | *I stopped listening. Let go of the key and press it again.* |
 
