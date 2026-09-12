@@ -682,7 +682,7 @@ const openTheStartPageIfNothingElseDid = async () => {
   await chrome.tabs.update(blank.id, { url: where, active: true });
   pageTabId = blank.id;
   log(`nothing was open, so the blank tab was sent to ${where}`);
-  await waitForThePage(blank.id);
+  await waitForThePage(blank.id, String(blank.url ?? ''));
 };
 
 /** Scan whatever page the person is on and publish what it offers.
@@ -711,15 +711,28 @@ const readThePageAndPublish = async (why) => {
 
 /** A page settles, and only then is it read.
  *
- * Waiting for `complete` alone is answered instantly by the page being LEFT — nothing has
- * committed the navigation by the time the call returns. So the wait is for a `complete` that
- * arrives AFTER we asked for it, on the tab we asked about, and it has a deadline.
+ * `complete` ALONE IS NOT THE ANSWER, and this is measured rather than argued. A tab that has
+ * just been created fires `complete` for the empty document it starts life as, before it has
+ * gone anywhere at all — so a wait on the first `complete` returns in a few hundred
+ * milliseconds, the scan that follows finds no content script yet, and the phone reports a
+ * page with no tools on a page that is still arriving. The same is true of a tab being
+ * navigated: nothing has committed by the time the call returns, so the first `complete` is
+ * the page being LEFT.
  *
- * @param {number} tabId @param {number} ms @returns {Promise<'settled'|'timed out'>} */
-const waitForThePage = async (tabId, ms = PAGE_LOAD_MS) => {
+ * So the wait is for a `complete` on OUR tab at somewhere it was not. `wasAt` is where it was
+ * before we sent it, and it is compared rather than trusted: a redirect means the url we asked
+ * for is not necessarily the url that arrives.
+ *
+ * @param {number} tabId @param {string} [wasAt] @param {number} [ms]
+ * @returns {Promise<'settled'|'timed out'>} */
+const waitForThePage = async (tabId, wasAt = '', ms = PAGE_LOAD_MS) => {
   const wait = OneWait.create({ ms });
-  const settled = (id, info) => {
-    if (id === tabId && info.status === 'complete') wait.settled();
+  const settled = (id, info, tab) => {
+    if (id !== tabId || info.status !== 'complete') return;
+    const now = String(tab?.url ?? '');
+    // An empty document is never the page we were waiting for. Nor is the one we just left.
+    if (!now || KnownSites.isBlankPage(now) || now === wasAt) return;
+    wait.settled();
   };
   chrome.tabs.onUpdated.addListener(settled);
   const how = await wait.promise;
@@ -747,6 +760,10 @@ const openSite = async (said) => {
    * what open_site used to do, mid-sentence. */
   handedOverAt = Date.now();
 
+  // Where it was, so the wait below can tell the page we are going to from the page we are
+  // leaving — and from the empty document a brand new tab starts life as.
+  const wasAt = String(tab?.url ?? '');
+
   let id = tab?.id;
   if (how === 'open a tab') {
     const made = await chrome.tabs.create({ url: where, active: true });
@@ -758,7 +775,7 @@ const openSite = async (said) => {
   pageTabId = id;
   log(`${how}: ${where}`);
 
-  const settled = await waitForThePage(id);
+  const settled = await waitForThePage(id, wasAt);
   const scan = await readThePageAndPublish('a new page');
   const here = Orientation.arrived(scan?.title, scan?.url ?? where);
   return {
@@ -843,7 +860,7 @@ const runOnThePage = async (name, args, tool) => {
   // BEFORE the model is answered, or its next response is built against the page it has left.
   const now = await chrome.tabs.get(tab.id).catch(() => null);
   if (now && was && now.url !== was.url) {
-    await waitForThePage(tab.id);
+    await waitForThePage(tab.id, String(was.url ?? ''));
   }
   await readThePageAndPublish('after an action');
   return ToolResult.capped(result);
