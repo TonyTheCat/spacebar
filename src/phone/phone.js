@@ -891,7 +891,10 @@ const openTheStartPageIfNothingElseDid = async () => {
    * which is what it was written for; with a page already open there is nothing to fall back
    * from. lastResort: false, because an arbitrary tab is not "a page they are on" either. */
   const alreadySomewhere = await findPageTab({ lastResort: false });
-  if (alreadySomewhere && !KnownSites.isBlankPage(alreadySomewhere.url)) {
+  // url ?? pendingUrl, the same pair findPageTab uses: a tab still restoring a real page has
+  // an empty url and carries where it is going in pendingUrl. Read by url alone, somebody's
+  // page mid-restore looks blank and gets sent to the start page instead of left alone.
+  if (alreadySomewhere && !KnownSites.isBlankPage(alreadySomewhere.url ?? alreadySomewhere.pendingUrl)) {
     pageTabId = alreadySomewhere.id ?? pageTabId;
     return;
   }
