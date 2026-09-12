@@ -1,14 +1,16 @@
 /* Set up once, by somebody who can see the screen.
  *
- * Four things, and none of them is done by the person who will use Spacebar
- * every day: the key that the voice session needs, the microphone dialog that
- * Chrome shows exactly once, the page the browser opens on, and the language
- * that gets transcribed. Each is saved on its own, with its own line saying
- * what happened, so a helper can do one and come back for the rest.
+ * Two things, and neither is done by the person who will use Spacebar every
+ * day: the key that the voice session needs, and the microphone dialog that
+ * Chrome shows exactly once. Each is saved on its own, with its own line saying
+ * what happened, so a helper can do one and come back for the other.
  *
  * Nothing here opens a session or talks to OpenAI. The key goes into
  * chrome.storage.local under `openaiKey`, which is the only place the phone
  * reads it from, and it is never shown back — not even the first characters.
+ *
+ * This page loads no other script on purpose: a helper must be able to save the
+ * key even if everything else in the extension is broken.
  */
 
 /** @param {string} id */
@@ -68,70 +70,4 @@ el('mic').addEventListener('click', () => {
     .catch((error) => {
       tell('mic-state', `Chrome said no: ${String(error).slice(0, 120)}`, 'bad');
     });
-});
-
-/* 3. The start page. Shown back, because it is not a secret and a helper wants
- * to see what is already there. Resolved through the same table `open_site`
- * uses, so what is typed here is confirmed in the words the person would say.
- * A name nobody knows is refused rather than saved and quietly turned into
- * Google later. */
-
-void chrome.storage.local.get('startPage').then(({ startPage }) => {
-  const saved = typeof startPage === 'string' ? startPage : '';
-  input('start').value = saved;
-  tell('start-state', `Opens at ${KnownSites.startPage(saved)}`);
-});
-
-el('save-start').addEventListener('click', () => {
-  const said = input('start').value.trim();
-  if (said && !KnownSites.resolve(said)) {
-    tell(
-      'start-state',
-      `"${said}" is not a site I know, and I will not guess an address. ` +
-        `Try ${KnownSites.names().join(', ')}, or a full address like https://example.com.`,
-      'bad'
-    );
-    return;
-  }
-  void chrome.storage.local.set({ startPage: said }).then(() => {
-    tell('start-state', `Saved. Opens at ${KnownSites.startPage(said)}`, 'good');
-  });
-});
-
-/* 4. The language. A short list is offered; anything shaped like a language tag
- * is accepted. What is refused is a tag that would silently become English —
- * that is the same as no setting, and the one person who can fix it is typing. */
-
-for (const { tag, name } of SpokenLanguage.offered()) {
-  const option = document.createElement('option');
-  option.value = tag;
-  option.label = name;
-  el('languages').appendChild(option);
-}
-
-void chrome.storage.local.get('spokenLanguage').then(({ spokenLanguage }) => {
-  const saved = typeof spokenLanguage === 'string' ? spokenLanguage : '';
-  input('language').value = saved;
-  const tag = SpokenLanguage.of(saved);
-  tell('language-state', `Transcribing as ${SpokenLanguage.nameOf(tag)} (${tag})`);
-});
-
-el('save-language').addEventListener('click', () => {
-  const said = input('language').value.trim();
-  if (!SpokenLanguage.usable(said)) {
-    const offered = SpokenLanguage.offered()
-      .map((one) => `${one.tag} for ${one.name}`)
-      .join(', ');
-    tell(
-      'language-state',
-      `"${said}" is not shaped like a language tag and would quietly become English. ` +
-        `Use two letters — ${offered} — or a tag like pt-BR.`,
-      'bad'
-    );
-    return;
-  }
-  void chrome.storage.local.set({ spokenLanguage: said }).then(() => {
-    const tag = SpokenLanguage.of(said);
-    tell('language-state', `Saved. Transcribing as ${SpokenLanguage.nameOf(tag)} (${tag})`, 'good');
-  });
 });
