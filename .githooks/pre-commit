@@ -14,47 +14,20 @@
 #
 # The file must stay mode 755. Executed directly, a 644 hook is skipped by git with only a
 # hint that nobody reads.
+#
+# WHAT IT RUNS, and why it is one line rather than three.
+#
+# `npm run verify` is the same three checks this hook used to spell out itself — the manifest
+# still describes a loadable extension (`scripts/check-manifest.mjs`), every script we wrote
+# still parses (`scripts/check-syntax.mjs`), and the tests pass — and each of those files
+# carries the reasoning for its own check at the top of it.
+#
+# It is spelled as the npm script rather than as the three commands because somebody who does
+# not believe us runs `npm run verify` out of a clean clone, and a gate that is a SECOND
+# spelling of that command is a gate that drifts away from it: the commit passes, the check the
+# judges run does not, and nothing said so. One definition, in package.json, run from both
+# ends. npm is not a dependency here — it arrives with node, which this hook already needs.
 
 set -e
 
-# 1. Does the manifest still describe a loadable extension?
-#
-# This is the check with no substitute. Every path in manifest.json is resolved by Chrome and
-# by nothing else: a renamed file or a missing vendor copy shows up as an extension that does
-# not load, or — worse — one that loads with a content script silently absent, which reads
-# exactly like a page that has no tools. And the bricks are classic scripts sharing one global
-# scope, so their ORDER in the manifest is load-bearing: put drive-the-page.js before
-# filled-in.js and the failure is a ReferenceError in the middle of a form being filled in.
-node scripts/check-manifest.mjs
-
-# 2. Does every script we wrote still PARSE?
-#
-# Nothing between here and Chrome reads these files. A syntax error in a content script or in
-# the phone does not announce itself: the extension loads, that one script is silently absent,
-# and the page answers nothing — which is indistinguishable from a page that has no tools, the
-# exact confusion this product is built to prevent. check-manifest.mjs resolves the paths and
-# the load order; it never opens the files.
-#
-# `node --check` is the parser on its own: no dependencies, no execution, no configuration, and
-# it catches precisely that failure. vendor/ is left out — those are copies with their own
-# conventions, pinned by sha, and this repository does not get to have an opinion about them.
-for script in $(git ls-files -co --exclude-standard '*.js' '*.mjs' | grep -vE '^vendor/' || true); do
-  node --check "$script" || {
-    echo "pre-commit: $script does not parse — Chrome would load the extension without it."
-    exit 1
-  }
-done
-
-# 3. The tests.
-#
-# The modules in src/shared/ are pure and tested; the test files sit next to them. They are
-# listed explicitly rather than left to `node --test`'s own discovery so that vendor/ — a
-# directory of copied libraries with their own conventions — is never walked, and so that a
-# repository with no tests yet is a repository with nothing to run rather than an error.
-tests=$(git ls-files -co --exclude-standard '*.test.mjs' '*.test.js' | grep -v '^vendor/' || true)
-if [ -n "$tests" ]; then
-  # shellcheck disable=SC2086
-  node --test $tests
-else
-  echo "pre-commit: no test files yet — nothing to run."
-fi
+npm run verify
