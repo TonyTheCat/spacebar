@@ -8,9 +8,10 @@
     "node": ">=20"
   },
   "scripts": {
-    "verify": "npm run check:manifest && npm run check:syntax && npm test",
+    "verify": "npm run check:manifest && npm run check:globals && npm run check:syntax && npm test",
     "test": "node --test test/*.test.mjs",
     "check:manifest": "node scripts/check-manifest.mjs",
+    "check:globals": "node scripts/check-globals.mjs",
     "check:syntax": "node scripts/check-syntax.mjs",
     "prepare": "if git rev-parse --git-dir > /dev/null 2>&1; then git config core.hooksPath .githooks; fi"
   }

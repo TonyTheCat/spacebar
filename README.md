@@ -152,12 +152,14 @@ npm run verify   # the manifest resolves, every script parses, the tests pass
 ```
 
 `npm run verify` **needs no key, no browser and no network**, which is the point of running it
-first: it answers whether this checkout is whole before Chrome is involved. It is three checks
+first: it answers whether this checkout is whole before Chrome is involved. It is four checks
 and it names each one as it goes — `scripts/check-manifest.mjs` resolves every path
 `manifest.json` names and refuses a vendored script loaded before something that reads it,
-`scripts/check-syntax.mjs` parses every script the extension loads, and `node --test` runs the
-suite over `src/shared/`. Any one of them failing exits non-zero and names the file. The same
-command is what `.githooks/pre-commit` runs, so what passes here is what was committed.
+`scripts/check-globals.mjs` refuses a page whose own code uses a global no script on that page
+defines, `scripts/check-syntax.mjs` parses every script the extension loads, and `node --test`
+runs the suite over `src/shared/`. Any one of them failing exits non-zero and names the file.
+The same command is what `.githooks/pre-commit` runs, so what passes here is what was
+committed.
 
 Then load it and hand it a key:
 
