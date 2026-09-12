@@ -87,11 +87,53 @@ const scanTab = async (tabId) => {
  */
 const PHONE = 'src/phone/index.html';
 
+/** One run at a time, however many things ask at once.
+ *
+ * The reviewer found this the moment the top-level call was added: on a real install BOTH the
+ * top level and onInstalled call this, and each begins by asking tabs.query. Two questions can
+ * be in the air before either answer comes back, both find no phone, and both create one — two
+ * phones, two sessions, and two microphones held against one person, which is the exact harm
+ * the dedup below exists to prevent.
+ *
+ * A shared promise closes it: whoever is second joins the run already going rather than
+ * starting a second. Cleared when it finishes, so a later ask — a browser start, a reload —
+ * still does its own work. */
+let opening = null;
+
 /**
  * @param {{ reviveStale: boolean }} how
- *   reviveStale: is an existing phone tab to be TRUSTED, or reloaded?
  */
-const openThePhone = async ({ reviveStale }) => {
+const openThePhone = (how) => {
+  /* Whoever is second joins the run already going — and if THEY asked to revive, the run
+   * revives. A caller that only wanted "make sure one exists" must never silence a caller that
+   * knows the existing one is dead: joining the weaker run would be the strongest reason to
+   * reload quietly losing to the fact that something else asked first.
+   *
+   * The cleanup is attached to whatever the chain is NOW, every time, and that is the
+   * reviewer's second find. Hung on the first run alone, it fires when THAT run settles —
+   * which is before a joined revive has even started — so the shared promise would be thrown
+   * away in the middle of the work it was protecting. It did not bite today only because
+   * three call sites never overlap three deep, and a guarantee that holds by counting call
+   * sites is not a guarantee. It is compared before clearing, so a later, unrelated run is
+   * never cleared by an older one finishing. */
+  const chain = opening
+    ? how.reviveStale
+      ? opening.then(() => theOnlyOpening(how))
+      : opening
+    : theOnlyOpening(how);
+
+  const mine = chain.finally(() => {
+    // Compared against the promise THIS call published, not against the chain inside it: the
+    // published one is the wrapper, and comparing the wrong one never matches, which would
+    // leave `opening` set forever and stop the phone ever being opened again. Found by
+    // reading this back after writing it.
+    if (opening === mine) opening = null;
+  });
+  opening = mine;
+  return opening;
+};
+
+const theOnlyOpening = async ({ reviveStale }) => {
   const url = chrome.runtime.getURL(PHONE);
 
   /* One phone, however the browser came back.
@@ -131,6 +173,19 @@ const openThePhone = async ({ reviveStale }) => {
   await chrome.tabs.reload(already.id).catch(() => chrome.tabs.create({ url, pinned: true, active: false }));
 };
 
+/* NOT revived on a browser start, and that stayed this way on purpose after an hour of being
+ * told otherwise.
+ *
+ * The report was that a restored phone comes back as a corpse — a tab at our own address with
+ * a dead extension context — and that this path therefore had to reload it. I had already
+ * written the change when its own author said they could not reproduce the red in any of three
+ * configurations: clean install, second launch on the same profile, and an unclean kill with a
+ * restart. No corpse in any of them.
+ *
+ * So it is back to what it was. A restored tab loads its scripts against the extension
+ * starting with it, and reloading one on every browser start would throw away a session that
+ * is coming up anyway — a real cost, paid for a failure nobody has been able to show. If a red
+ * turns up, this is the line, and reviveStale is already the argument it takes. */
 chrome.runtime.onStartup.addListener(() => void openThePhone({ reviveStale: false }));
 chrome.runtime.onInstalled.addListener(() => void openThePhone({ reviveStale: true }));
 
