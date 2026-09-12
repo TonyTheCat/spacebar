@@ -415,6 +415,16 @@ const openTheLine = async () => {
   /* The microphone is opened once and kept, and its track starts DISABLED. Push to talk IS
    * that flag: permission is granted once, and nothing is heard until the key is held. A
    * microphone that is open because it was easier is the thing this product must not be. */
+  /* Said BEFORE the ask, out loud, because the thing they have to do next is invisible to them.
+   *
+   * Chrome puts a permission bubble at the top of the window. Somebody who cannot see it gets
+   * silence from a phone that says "short-lived key minted" and then nothing at all, while the
+   * browser waits for a click on something they do not know is there. One sentence, from the
+   * phone's own voice — this is exactly the kind of moment the recorded lines exist for, and
+   * the session cannot say it because the session is not up yet. */
+  state('waiting for the microphone — allow it in the browser');
+  sayOutLoud('Allow the microphone. Your browser is asking, at the top of the window.');
+
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true }).catch((error) => {
     // Silence from here would be indistinguishable from an agent with nothing to say — and
     // this is the one failure where the person is about to hold a key and talk into a
