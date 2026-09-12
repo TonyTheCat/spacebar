@@ -73,6 +73,10 @@ p {
 .key-row .eye[aria-pressed='true'] {
   color: var(--ink);
 }
+/* The hidden attribute does nothing on an <svg> in Chrome: the UA rule is HTML-only. */
+.key-row .eye svg[hidden] {
+  display: none;
+}
 section {
   margin-top: 2rem;
   padding-top: 1.25rem;
