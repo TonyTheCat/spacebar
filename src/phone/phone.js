@@ -318,6 +318,7 @@ const onServerEvent = (message) => {
 const comeBack = async (said) => {
   if (!theLine.down()) return; // somebody else already noticed; one reconnection, not three
   turn.clear();
+  answerWasCutOff = false;
   talkKeyOnPhone.lostSight();
   if (microphone) microphone.enabled = false;
   peer?.close();
@@ -361,8 +362,15 @@ const connect = async () => {
  *  running at a time.
  *  @returns {Promise<boolean>} true if the connection was established. */
 const openTheLine = async () => {
-  // A new line is a new hello: whatever turn the last one was in the middle of went with it.
+  /* A new line is a new hello: whatever turn the last one was in the middle of went with it.
+   *
+   * Including the fact that an answer was cut off. That flag is consumed by the next ask, and
+   * if the line drops inside the cancel window the ask never comes — so it would survive the
+   * reconnection and tell a fresh session that its previous answer was interrupted. It was not:
+   * that session did not exist yet. Found by the reviewer, and it is exactly the shape of thing
+   * that produces one baffling turn nobody can reproduce. */
   turn.clear();
+  answerWasCutOff = false;
 
   /* The key comes from the settings page, never from here. It used to be a password field on
    * this surface — the one screen a blind person uses every day, asking them to type a secret
