@@ -516,6 +516,28 @@ const orNothing = async (asked, what, ms = ONE_ROUND_TRIP_MS) => {
   return answer ?? null;
 };
 
+/** How long to wait before asking a document that is actually there. */
+const A_BREATH_MS = 500;
+
+/** Ask a page something READ-ONLY, twice if the first ask finds nobody listening.
+ *
+ * A tab reports `complete` while the content script of the NEW document may still not be
+ * listening, and sendMessage then rejects with "Could not establish connection" — which looks
+ * exactly like a page that has no tools. Measured on the live benefit finder: nothing on the
+ * first ask, three tools on the second.
+ *
+ * ONLY for reading. An action is never retried: asking a page to press something twice because
+ * the first answer was slow is how somebody sends a form twice, and one of those is a thing
+ * that cannot be undone. Reading the same page twice costs nothing.
+ *
+ * @param {number} tabId @param {object} message @param {string} what */
+const askThePageTwice = async (tabId, message, what) => {
+  const first = await orNothing(chrome.tabs.sendMessage(tabId, message), what);
+  if (first && typeof first === 'object') return first;
+  await new Promise((done) => setTimeout(done, A_BREATH_MS));
+  return orNothing(chrome.tabs.sendMessage(tabId, message), `${what}, asked again`);
+};
+
 /** The tab the person is on. Never this one, and never another extension page.
  *  @returns {Promise<chrome.tabs.Tab|null>} */
 const findPageTab = async () => {
@@ -672,7 +694,7 @@ const readThePageAndPublish = async (why) => {
     return null;
   }
   pageTabId = tab.id;
-  const scan = await orNothing(chrome.tabs.sendMessage(tab.id, { type: PT.SCAN_REQUEST }), 'the scan');
+  const scan = await askThePageTwice(tab.id, { type: PT.SCAN_REQUEST }, 'the scan');
   if (!scan || typeof scan !== 'object') {
     // Could not look. NOT "the page has none" — said apart, the agent reports it lost the page;
     // run together it tells somebody who cannot see that the thing they asked for is not there.
@@ -752,7 +774,7 @@ const openSite = async (said) => {
 const readThePage = async () => {
   const tab = await findPageTab();
   if (!tab || tab.id === undefined) return { ok: false, text: VoiceLines.NO_PAGE.text };
-  const page = await orNothing(chrome.tabs.sendMessage(tab.id, { type: PT.READ_REQUEST }), 'the read');
+  const page = await askThePageTwice(tab.id, { type: PT.READ_REQUEST }, 'the read');
   if (!page) return { ok: false, text: 'That page did not answer.' };
   if (page.error) return { ok: false, text: `I could not read that page: ${page.error}` };
 
@@ -878,7 +900,7 @@ const answerTheCall = async (call, name, args) => {
       const tab = await findPageTab();
       const scan = tab?.id === undefined
         ? null
-        : await orNothing(chrome.tabs.sendMessage(tab.id, { type: PT.SCAN_REQUEST }), 'the scan');
+        : await askThePageTwice(tab.id, { type: PT.SCAN_REQUEST }, 'the scan');
       const tool = (scan?.synthesized ?? []).find((one) => one.name === name);
       result = await runOnThePage(name, args, tool);
     }
