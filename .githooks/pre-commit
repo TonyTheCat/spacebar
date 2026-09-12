@@ -27,7 +27,25 @@ set -e
 # filled-in.js and the failure is a ReferenceError in the middle of a form being filled in.
 node scripts/check-manifest.mjs
 
-# 2. The tests.
+# 2. Does every script we wrote still PARSE?
+#
+# Nothing between here and Chrome reads these files. A syntax error in a content script or in
+# the phone does not announce itself: the extension loads, that one script is silently absent,
+# and the page answers nothing — which is indistinguishable from a page that has no tools, the
+# exact confusion this product is built to prevent. check-manifest.mjs resolves the paths and
+# the load order; it never opens the files.
+#
+# `node --check` is the parser on its own: no dependencies, no execution, no configuration, and
+# it catches precisely that failure. vendor/ is left out — those are copies with their own
+# conventions, pinned by sha, and this repository does not get to have an opinion about them.
+for script in $(git ls-files -co --exclude-standard '*.js' '*.mjs' | grep -vE '^vendor/' || true); do
+  node --check "$script" || {
+    echo "pre-commit: $script does not parse — Chrome would load the extension without it."
+    exit 1
+  }
+done
+
+# 3. The tests.
 #
 # The modules in src/shared/ are pure and tested; the test files sit next to them. They are
 # listed explicitly rather than left to `node --test`'s own discovery so that vendor/ — a
