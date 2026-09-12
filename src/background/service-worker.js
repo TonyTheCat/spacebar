@@ -134,6 +134,28 @@ const openThePhone = async ({ reviveStale }) => {
 chrome.runtime.onStartup.addListener(() => void openThePhone({ reviveStale: false }));
 chrome.runtime.onInstalled.addListener(() => void openThePhone({ reviveStale: true }));
 
+/* AND AT THE TOP LEVEL, because neither of those two fires on the path that matters.
+ *
+ * Measured, on a copy of the real demo profile with the extension loaded from the folder the
+ * recorder uses: the service worker starts, and no phone opens at all. onStartup never fires
+ * under --load-extension — every launch is treated as an install, which is the note already
+ * written above it — and onInstalled does not fire either, because in THAT profile the
+ * extension is already registered from earlier runs. Two handlers, neither of them reached,
+ * and a browser with a dead pinned page and no voice. It is why every real take of the film
+ * died: the phone was never there to report its tools.
+ *
+ * The worker itself does wake on load, whatever event did or did not fire, so this is the one
+ * place that always runs.
+ *
+ * NOT reviveStale HERE, and that is the whole care of this change. A service worker restarts
+ * on any event after it has been idle, and top-level code runs again on every one of those
+ * restarts — so reviving from here would RELOAD the phone in the middle of a live voice
+ * session, dropping the line somebody was talking to. The dedup below already stops a second
+ * phone; what this adds is the first one. Reviving a dead phone stays on onInstalled, which
+ * happens once, when the extension is actually (re)loaded.
+ */
+void openThePhone({ reviveStale: false });
+
 chrome.tabs.onUpdated.addListener((tabId, info) => {
   if (info.status === 'complete') void scanTab(tabId);
 });
