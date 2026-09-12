@@ -973,12 +973,18 @@ const runOnThePage = async (name, args, tool) => {
   const tab = await findPageTab();
   if (!tab || tab.id === undefined) return { ok: false, text: VoiceLines.NO_PAGE.text };
 
+  /* Held now, while we still have it. Doing the action republishes the page's tools, which
+   * clears this map — and a value whose schema has gone is a value nothing can vouch for, so
+   * it is hidden. Read afterwards, the DONE line came back "search ran with {search: (hidden)}"
+   * about an ordinary search term. The masking rule is right; looking it up too late is not. */
+  const schema = schemasInPlay.get(name);
+
   /* The gate. A tool the page marked as committing something is NOT run: it is parked, and the
    * model is handed the sentence it must say — which contains the values about to be sent, so
    * that what is agreed to is what happens. The press comes later, through confirm_action, and
    * only on the person's own words. */
   if (tool && Gating.mustAskOutLoud(tool)) {
-    parked = { name, args, at: Date.now() };
+    parked = { name, args, at: Date.now(), schema: tool.inputSchema };
     return {
       ok: false,
       text: Consent.question(tool.description, args, tool.inputSchema),
@@ -1035,7 +1041,7 @@ const runOnThePage = async (name, args, tool) => {
     return {
       ok: true,
       text: [
-        AfterTheAction.wentThrough(name, Consent.written(args, schemasInPlay.get(name))),
+        AfterTheAction.wentThrough(name, Consent.written(args, schema)),
         count,
         Orientation.arrived(now?.title, now?.url),
       ]
