@@ -69,6 +69,48 @@ test('an empty value is left out rather than read back as nothing', () => {
   assert.match(said, /kept "yes"/);
 });
 
+test('our own tools are read back, because we wrote their schemas', () => {
+  /* Twice on live runs the log said the model called one of OUR tools with everything
+   * (hidden) — open_site with its site, then fill_in with its tool, field and value. The
+   * masking rule is right; what was missing was the schema, because the map the phone looks
+   * these up in only ever held the PAGE's tools.
+   *
+   * These are the schemas as phone.js declares them, in the shape it declares them in. A
+   * tool of ours is described, so every one of its arguments is said out loud — there is
+   * nothing secret in a site name, a field name or a value somebody just spoke.
+   */
+  const openSite = {
+    type: 'object',
+    properties: { site: { type: 'string', description: 'What they said: a site name, or an address.' } },
+    required: ['site'],
+  };
+  const fillIn = {
+    type: 'object',
+    properties: {
+      tool: { type: 'string', description: 'The name of the submit tool this field belongs to.' },
+      field: { type: 'string', description: "The field, named as that tool's schema names it." },
+      value: { type: 'string', description: 'What they said, as they said it.' },
+    },
+    required: ['tool', 'field', 'value'],
+  };
+
+  assert.equal(written({ site: 'usa.gov' }, openSite), '{"site":"usa.gov"}');
+  assert.equal(
+    written({ tool: 'submitNext', field: 'dayOfBirth', value: '20' }, fillIn),
+    '{"tool":"submitNext","field":"dayOfBirth","value":"20"}'
+  );
+  // And the same values are said out loud, not withheld.
+  const said = question('Put one value into one field', { field: 'dayOfBirth', value: '20' }, fillIn);
+  assert.match(said, /field "dayOfBirth"/);
+  assert.match(said, /value "20"/);
+});
+
+test('a tool with NO schema still withholds, which is why the map must hold ours', () => {
+  // The other half of the same fact: this is what our own tools looked like while the map
+  // held only the page's, and it is the correct behaviour for a schema we do not have.
+  assert.equal(written({ site: 'usa.gov' }), '{"site":"(hidden)"}');
+});
+
 test('a placeholder is not a value, so it is not read back', () => {
   // Measured on the wizard: the model called the submit with the selects' own placeholder
   // text, and the gate read "-Select-" back as if somebody had chosen it.
