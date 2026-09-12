@@ -172,6 +172,39 @@ const { press, setValue, asItTakesIt, snapshot, changedSince, complaints } = Pag
 const SETTLE_MS = 800;
 const settle = () => new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
 
+/** Wait for the page to settle — unless the page is LEAVING, in which case say so at once.
+ *
+ * Measured, with the phone taken out of the picture: a probe sent EXECUTE_REQUEST straight
+ * from an extension page to this content script on a search form, and Chrome answered
+ *
+ *   "The page keeping the extension port is moved into back/forward cache, so the message
+ *    channel is closed."
+ *
+ * The commit navigates, this document goes into the back/forward cache, and the port goes
+ * with it. The answer is then not late — it can never arrive, however long anybody waits, and
+ * the phone reports "it took too long and I do not know whether it went through" about
+ * something that went through perfectly.
+ *
+ * So the settle races the document's own departure. pagehide fires as the document is being
+ * put away, BEFORE the port is closed, which is the last moment an answer can still be sent.
+ * Winning that race is not guaranteed — it is a race — so the phone keeps its own half: an
+ * answer that never comes on a committing tool means the page moved, which is exactly what
+ * AfterTheAction.wentThrough is for. This makes the good case work rather than pretending the
+ * bad one cannot happen.
+ *
+ * @returns {Promise<'settled'|'the page is leaving'>} */
+const settleUnlessThePageIsLeaving = () =>
+  new Promise((resolve) => {
+    const leaving = () => resolve('the page is leaving');
+    // Once, and removed either way: a listener left on a document that stays is a listener
+    // that answers the NEXT action's race.
+    window.addEventListener('pagehide', leaving, { once: true });
+    setTimeout(() => {
+      window.removeEventListener('pagehide', leaving);
+      resolve('settled');
+    }, SETTLE_MS);
+  });
+
 /** Read the page out, in our own voice.
  *
  * The finding is the brick's; the SHAPING is ours and stays here. How many results somebody
@@ -281,7 +314,11 @@ const execute = async (name, args, confirm) => {
     if (!ref.el?.isConnected) return { ok: false, text: 'That control is gone from the page.' };
     ref.el.scrollIntoView({ block: 'center' });
     press(ref.el);
-    await settle();
+    // A click can navigate too — a link styled as a button is the page's own call to action,
+    // and the port goes with the document the moment it does.
+    if ((await settleUnlessThePageIsLeaving()) === 'the page is leaving') {
+      return { ok: true, text: 'pressed it, and the page is moving because of it.', moved: true };
+    }
     return { ok: true, text: changedSince(before) };
   }
 
@@ -313,7 +350,12 @@ const execute = async (name, args, confirm) => {
 
     hit.el.scrollIntoView({ block: 'center' });
     press(hit.el);
-    await settle();
+    /* Following a link navigates by definition, so this is the branch where the race is won
+     * most often — and where waiting out the settle would guarantee an answer that cannot be
+     * delivered. */
+    if ((await settleUnlessThePageIsLeaving()) === 'the page is leaving') {
+      return { ok: true, text: `followed "${hit.label}", and the page is moving.`, moved: true };
+    }
     return { ok: true, text: `followed "${hit.label}". ${changedSince(before)}` };
   }
 
@@ -422,7 +464,19 @@ const execute = async (name, args, confirm) => {
 
     ref.submit?.scrollIntoView({ block: 'center' });
     ref.commit();
-    await settle();
+    const how = await settleUnlessThePageIsLeaving();
+    if (how === 'the page is leaving') {
+      /* Answered in the moment the page is going away, because a moment later there is no
+       * channel to answer on. No changedSince() and no complaints(): both describe a page
+       * that is already being replaced, and a description of a page nobody is on is worse
+       * than none. What the caller needs is the part that is true — it was pressed, and the
+       * page moved because of it. */
+      return {
+        ok: true,
+        text: `filled ${steps.length} field(s), pressed "${label}", and the page is moving because of it.`,
+        moved: true,
+      };
+    }
     /* What the page said about it, in the page's own words.
      *
      * "Pressed" and "accepted" are different facts, and a form is exactly where they differ:
