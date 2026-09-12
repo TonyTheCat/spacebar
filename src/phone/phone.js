@@ -516,26 +516,45 @@ const orNothing = async (asked, what, ms = ONE_ROUND_TRIP_MS) => {
   return answer ?? null;
 };
 
-/** How long to wait before asking a document that is actually there. */
-const A_BREATH_MS = 500;
+/** How long to keep asking a page that is not listening yet, and how often. */
+const KEEP_ASKING_MS = 4000;
+const A_BREATH_MS = 250;
 
-/** Ask a page something READ-ONLY, twice if the first ask finds nobody listening.
+/** Ask a page something READ-ONLY, until it is there to answer or the time is up.
  *
- * A tab reports `complete` while the content script of the NEW document may still not be
- * listening, and sendMessage then rejects with "Could not establish connection" — which looks
- * exactly like a page that has no tools. Measured on the live benefit finder: nothing on the
- * first ask, three tools on the second.
+ * `complete` is not when the content script starts. It is injected at document_idle, which
+ * Chrome schedules AFTER the load event at its own discretion — measured here as several
+ * hundred milliseconds to over a second past the `complete` this phone waits for. Until then
+ * sendMessage rejects with "Could not establish connection", which looks exactly like a page
+ * that has no tools: the run said "the page did not answer a scan" three times about a page
+ * that answered perfectly when asked again three seconds later.
  *
- * ONLY for reading. An action is never retried: asking a page to press something twice because
- * the first answer was slow is how somebody sends a form twice, and one of those is a thing
- * that cannot be undone. Reading the same page twice costs nothing.
+ * So this asks until somebody is listening, on a deadline. Two asks a fixed breath apart is
+ * what the service worker does and it is right there — an opportunistic scan on a page that
+ * finished loading whenever it did. This path is different: the phone has JUST sent them
+ * somewhere and is waiting for that page specifically, so a bounded poll is the honest shape.
+ *
+ * ONLY for reading. An action is never retried: asking a page to press something again because
+ * the first answer was slow is how a form gets sent twice, and one of those cannot be undone.
+ * Reading the same page twice costs nothing.
  *
  * @param {number} tabId @param {object} message @param {string} what */
-const askThePageTwice = async (tabId, message, what) => {
-  const first = await orNothing(chrome.tabs.sendMessage(tabId, message), what);
-  if (first && typeof first === 'object') return first;
-  await new Promise((done) => setTimeout(done, A_BREATH_MS));
-  return orNothing(chrome.tabs.sendMessage(tabId, message), `${what}, asked again`);
+const askUntilItAnswers = async (tabId, message, what) => {
+  const until = Date.now() + KEEP_ASKING_MS;
+  let asks = 0;
+  for (;;) {
+    asks += 1;
+    const answer = await chrome.tabs.sendMessage(tabId, message).catch(() => null);
+    if (answer && typeof answer === 'object') {
+      if (asks > 1) log(`${what}: answered on ask ${asks}`);
+      return answer;
+    }
+    if (Date.now() >= until) {
+      log(`${what}: nobody answered after ${asks} asks`);
+      return null;
+    }
+    await new Promise((done) => setTimeout(done, A_BREATH_MS));
+  }
 };
 
 /** The tab the person is on. Never this one, and never another extension page.
@@ -694,7 +713,7 @@ const readThePageAndPublish = async (why) => {
     return null;
   }
   pageTabId = tab.id;
-  const scan = await askThePageTwice(tab.id, { type: PT.SCAN_REQUEST }, 'the scan');
+  const scan = await askUntilItAnswers(tab.id, { type: PT.SCAN_REQUEST }, 'the scan');
   if (!scan || typeof scan !== 'object') {
     // Could not look. NOT "the page has none" — said apart, the agent reports it lost the page;
     // run together it tells somebody who cannot see that the thing they asked for is not there.
@@ -791,7 +810,7 @@ const openSite = async (said) => {
 const readThePage = async () => {
   const tab = await findPageTab();
   if (!tab || tab.id === undefined) return { ok: false, text: VoiceLines.NO_PAGE.text };
-  const page = await askThePageTwice(tab.id, { type: PT.READ_REQUEST }, 'the read');
+  const page = await askUntilItAnswers(tab.id, { type: PT.READ_REQUEST }, 'the read');
   if (!page) return { ok: false, text: 'That page did not answer.' };
   if (page.error) return { ok: false, text: `I could not read that page: ${page.error}` };
 
@@ -917,7 +936,7 @@ const answerTheCall = async (call, name, args) => {
       const tab = await findPageTab();
       const scan = tab?.id === undefined
         ? null
-        : await askThePageTwice(tab.id, { type: PT.SCAN_REQUEST }, 'the scan');
+        : await askUntilItAnswers(tab.id, { type: PT.SCAN_REQUEST }, 'the scan');
       const tool = (scan?.synthesized ?? []).find((one) => one.name === name);
       result = await runOnThePage(name, args, tool);
     }
