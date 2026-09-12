@@ -254,8 +254,12 @@ const onServerEvent = (message) => {
     if (accepted && ToolsAck.answers(accepted.names, names)) {
       accepted.wait.settled();
       accepted = null;
+      // Now we KNOW what it holds, by its own word. The only place that may say so.
+      heldBySession = names;
     } else if (accepted) {
       log('that was an acknowledgement of another list — still waiting for ours');
+      // And we no longer know what it is holding, so nothing may be skipped on that belief.
+      heldBySession = null;
     }
   }
 
@@ -371,6 +375,8 @@ const openTheLine = async () => {
    * that produces one baffling turn nobody can reproduce. */
   turn.clear();
   answerWasCutOff = false;
+  // A new session holds nothing, whatever the last one had taken.
+  heldBySession = null;
 
   /* The key comes from the settings page, never from here. It used to be a password field on
    * this surface — the one screen a blind person uses every day, asking them to type a secret
@@ -534,12 +540,37 @@ let heardAt = 0;
  *  @type {{names: string[], wait: ReturnType<typeof OneWait.create>}|null} */
 let accepted = null;
 
+/** What the session itself says it is holding. Only its own acknowledgement may set this: our
+ *  belief about what we sent is not evidence about what it took. @type {string[]|null} */
+let heldBySession = null;
+
 /** The schema of each tool currently on offer, by name. Kept so that what is read back at the
  *  gate can be masked by the same rules the schema declares — a password is named, never said. */
 const schemasInPlay = new Map();
 
 /** An action that has been asked about and is waiting for a real answer. */
-let parked = /** @type {{name: string, args: object, at: number}|null} */ (null);
+let parked = /** @type {{name: string, args: object, at: number, schema?: object}|null} */ (null);
+
+/** The ONE press a person has just agreed to.
+ *
+ * The page asks the extension to confirm before it runs anything gated — its own gate, and not
+ * a duplicate of ours: ours stops the model pressing without asking, its one stops the PAGE
+ * pressing on its own behalf, and a gate that trusts whoever is calling it is not a gate. It
+ * has to be answered, and an unanswered request is read as no, which is the safe direction and
+ * exactly what went wrong: the phone listened for the talk key and nothing else, so every
+ * confirmed press came back "the human declined to press Search" — said to the person who had
+ * just said yes.
+ *
+ * So this is a token for one press: set when their own words confirmed it, spent by the first
+ * matching question, and gone. Anything else — a second ask for the same tool, a press
+ * nobody agreed to, a page trying its luck — is answered no, because it is.
+ *
+ * @type {{name: string, at: number}|null} */
+let pressToken = null;
+
+/** How long a confirmed press stays confirmable. Long enough for the round trip to the page,
+ *  short enough that a yes cannot be spent on something that happens later. */
+const PRESS_TOKEN_MS = 15000;
 
 /** How long a parked action stays answerable. A question nobody answered must die rather than
  *  be answered late: a yes said ninety seconds after the fact is a yes to something else. */
@@ -725,6 +756,22 @@ const toolsOf = (scan) => {
  *  @param {object[]} tools @param {string} why @returns {Promise<boolean>} accepted? */
 const handToTheSession = async (tools, why) => {
   const names = tools.map((tool) => String(tool.name));
+
+  /* A list the session already HOLDS is not sent again.
+   *
+   * Not tidiness: every publish is a session.update the session has to take in order, and one
+   * action produces two of them — the tab finishing its load, and the action's own republish.
+   * The second arrives while the first is still being acknowledged, and then "was my list
+   * accepted?" has two answers in flight for the same question, which is the race the whole
+   * ToolsAck correlation exists to settle.
+   *
+   * Only when it is the SAME list, by the session's own word about what it holds — and it is
+   * said out loud in the log as KEPT. A list quietly not sent looks exactly like a list that
+   * was dropped, and those mean opposite things to whoever is reading the feed afterwards. */
+  if (heldBySession && ToolsAck.answers(heldBySession, names)) {
+    log(`the session already holds these ${names.length} tools — KEPT, not sent again (${why})`);
+    return true;
+  }
   // An older wait is finished rather than left for its own deadline: what matters is that the
   // LAST list sent has been accepted.
   accepted?.wait.giveUp();
@@ -739,6 +786,7 @@ const handToTheSession = async (tools, why) => {
   if (how === 'timed out') log('the session never acknowledged that list — answering anyway');
   return how === 'settled';
 };
+
 
 /** One fallback, once per phone: somewhere real to start.
  *
@@ -942,16 +990,31 @@ const fillOneField = async (args) => {
 
 /** Run one of the page's own tools, or ask about it first.
  *  @param {string} name @param {object} args @param {Tool|undefined} tool */
-const runOnThePage = async (name, args, tool) => {
+const runOnThePage = async (name, args, tool, knownSchema) => {
   const tab = await findPageTab();
   if (!tab || tab.id === undefined) return { ok: false, text: VoiceLines.NO_PAGE.text };
+
+  /* The schema this tool was OFFERED with, and nothing later.
+   *
+   * Doing the action republishes the page's tools, which clears this map — so looking it up
+   * afterwards found nothing and the DONE line came back "search ran with {search: (hidden)}"
+   * about an ordinary search term. The masking rule behind that is right and stays: a value no
+   * schema describes is a value nothing can vouch for.
+   *
+   * For a GATED action the gap is wider and worse, which the reviewer caught. Park and press
+   * are two separate turns with a person speaking in between; by then the map can hold a
+   * DIFFERENT page's tool under the same name, whose schema does not mark the password this
+   * one had. Masking would then read a schema that describes something else and print the
+   * secret in full. So a parked action carries the schema it was asked about with, and it is
+   * passed back in here rather than looked up again. */
+  const schema = knownSchema ?? schemasInPlay.get(name);
 
   /* The gate. A tool the page marked as committing something is NOT run: it is parked, and the
    * model is handed the sentence it must say — which contains the values about to be sent, so
    * that what is agreed to is what happens. The press comes later, through confirm_action, and
    * only on the person's own words. */
   if (tool && Gating.mustAskOutLoud(tool)) {
-    parked = { name, args, at: Date.now() };
+    parked = { name, args, at: Date.now(), schema: tool.inputSchema };
     return {
       ok: false,
       text: Consent.question(tool.description, args, tool.inputSchema),
@@ -987,16 +1050,33 @@ const runOnThePage = async (name, args, tool) => {
   const wentSomewhere = Boolean(now && wasAt && now.url && now.url !== wasAt);
   await readThePageAndPublish('after an action');
 
-  if (result && result !== 'timed out') return ToolResult.capped(result);
+  /* The page side answers `moved: true` when it wins its own race with pagehide — it pressed,
+   * and the page is going. ToolResult.capped keeps only ok and text, so it is read here, off
+   * the raw answer, before anything trims it. */
+  const itSaysItMoved = Boolean(result && typeof result === 'object' && result.moved === true);
+  if (result && result !== 'timed out' && !itSaysItMoved) return ToolResult.capped(result);
 
-  if (wentSomewhere || moved === 'settled') {
+  if (itSaysItMoved || wentSomewhere || moved === 'settled') {
     /* The port died because the page went away, which is the press working. Said as DONE, with
      * where they are now and an instruction not to do it again: a model told "I do not know"
      * about something that happened will helpfully try it a second time. */
-    log(`${name}: the port closed because the page moved — it went through`);
+    log(`${name}: the page moved — it went through`);
+    /* And how many things are on the page now.
+     *
+     * A count is what tells somebody who cannot see the screen that the page in front of them
+     * IS the answer to what they asked: "nine results" cannot be mistaken for a page that did
+     * not load. It costs one read, on a page we have just waited for. */
+    const page = now?.id === undefined ? null : await askUntilItAnswers(now.id, { type: PT.READ_REQUEST }, 'the read');
+    const count = AfterTheAction.onScreen(page?.results, page?.of);
     return {
       ok: true,
-      text: `${AfterTheAction.wentThrough(name, Consent.written(args, schemasInPlay.get(name)))} ${Orientation.arrived(now?.title, now?.url)}`,
+      text: [
+        AfterTheAction.wentThrough(name, Consent.written(args, schema)),
+        count,
+        Orientation.arrived(now?.title, now?.url),
+      ]
+        .filter(Boolean)
+        .join(' '),
     };
   }
 
@@ -1039,7 +1119,13 @@ const pressWhatWasParked = async () => {
   const doIt = parked;
   parked = null;
   log(`confirmed by their own words — pressing ${doIt.name}`);
-  return runOnThePage(doIt.name, doIt.args, undefined);
+  // The page will ask the extension to confirm this press before it runs it. This is the one
+  // press that may be answered yes, and it is answered yes exactly once.
+  pressToken = { name: doIt.name, at: Date.now() };
+  const pressed = await runOnThePage(doIt.name, doIt.args, undefined, doIt.schema);
+  // Whatever happened, the token does not outlive the press it was minted for.
+  pressToken = null;
+  return pressed;
 };
 
 /** Answer one tool call. Every path answers, whatever happens inside it: a call that never
@@ -1162,6 +1248,27 @@ chrome.runtime.onMessage.addListener((message, sender) => {
 
   if (message?.type === PT.TALK_STOP) {
     closeTheHeldTurn(message.why ?? 'released');
+    return false;
+  }
+
+  if (message?.type === PT.CONFIRM_REQUEST) {
+    /* Yes for exactly the press a person agreed to, and no for everything else.
+     *
+     * Answered synchronously — sendResponse after this listener has returned reaches nobody,
+     * and a confirmation that arrives too late is a confirmation that never came. */
+    const mine =
+      message.askedBy === 'phone' &&
+      pressToken !== null &&
+      Date.now() - pressToken.at < PRESS_TOKEN_MS;
+    if (mine) {
+      log(`confirming the press of "${message.label}" — they said yes to this one`);
+      // Spent. One yes is one press: a token left lying around would confirm the next thing
+      // the page asks about, which nobody agreed to.
+      pressToken = null;
+    } else {
+      log(`refusing to confirm "${message.label}" — nobody agreed to that`);
+    }
+    sendResponse({ ok: mine });
     return false;
   }
 

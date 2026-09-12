@@ -65,9 +65,5 @@
       "all_frames": false,
       "world": "MAIN"
     }
-  ],
-  "options_ui": {
-    "page": "src/options/index.html",
-    "open_in_tab": true
-  }
+  ]
 }
