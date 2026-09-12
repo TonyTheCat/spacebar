@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Spacebar — the phone</title>
+    <link rel="stylesheet" href="phone.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Spacebar</h1>
+      <p id="state" class="state" role="status" aria-live="polite">not connected</p>
+      <button id="connect" type="button">Connect</button>
+    </header>
+
+    <p class="hint">
+      Hold <kbd>Space</kbd> on the page and talk. Let go when you are done. Nothing is heard
+      while the key is up.
+    </p>
+
+    <section aria-labelledby="log-title">
+      <h2 id="log-title">What happened</h2>
+      <ol id="log" class="log"></ol>
+    </section>
+
+    <!-- Classic scripts in one global scope: order is the import. Copied from the old phone
+         page, not reconstructed — a page that misses one throws a ReferenceError in the
+         middle of a live session. Anton confirms this list against phone.js. -->
+    <script src="../shared/protocol.js"></script>
+    <script src="../shared/consent.js"></script>
+    <script src="../shared/coalesce.js"></script>
+    <script src="../shared/push-to-talk.js"></script>
+    <script src="../shared/one-session.js"></script>
+    <script src="../shared/session-errors.js"></script>
+    <script src="../shared/turns.js"></script>
+    <script src="../shared/one-wait.js"></script>
+    <script src="../shared/start-here.js"></script>
+    <script src="../shared/tools-ack.js"></script>
+    <script src="../shared/gating.js"></script>
+    <script src="../shared/going-there.js"></script>
+    <script src="../shared/tool-result.js"></script>
+    <script src="../shared/shortlist.js"></script>
+    <script src="../shared/readable.js"></script>
+    <script src="../../vendor/filled-in.js"></script>
+    <script src="../shared/handover.js"></script>
+    <script src="../shared/spoken-language.js"></script>
+    <script src="../shared/session-setup.js"></script>
+    <script src="../shared/startup-diary.js"></script>
+    <script src="../shared/known-sites.js"></script>
+    <script src="../../vendor/voice-lines.js"></script>
+    <script src="../shared/orientation.js"></script>
+    <script src="../shared/still-to-say.js"></script>
+    <script src="../shared/after-the-action.js"></script>
+    <script src="../shared/holding-the-key.js"></script>
+    <script src="instructions.js"></script>
+    <script src="phone.js"></script>
+  </body>
+</html>

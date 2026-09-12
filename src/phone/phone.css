@@ -1,0 +1,88 @@
+/* A telephone, not a dashboard. The person it is for never looks at it; anybody
+   who does is debugging, so the log is the biggest thing on the page. */
+:root {
+  color-scheme: dark;
+  --ink: #e8ecf4;
+  --muted: #94a3b8;
+  --line: #1f2733;
+  --paper: #14171c;
+  --well: #0f1319;
+  --edge: #33405a;
+  --live: #4ade80;
+  --talking: #facc15;
+  --failed: #f87171;
+}
+body {
+  margin: 0;
+  padding: 24px;
+  max-width: 46em;
+  font: 15px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: var(--ink);
+  background: var(--paper);
+}
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 16px;
+  margin-bottom: 12px;
+}
+h1 {
+  font-size: 20px;
+  margin: 0;
+}
+h2 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin: 24px 0 8px;
+}
+.state {
+  margin: 0;
+  flex: 1 1 auto;
+  color: var(--muted);
+}
+.state.live {
+  color: var(--live);
+}
+.state.talking {
+  color: var(--talking);
+}
+.state.failed {
+  color: var(--failed);
+}
+button {
+  padding: 6px 14px;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  background: var(--well);
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  background: var(--well);
+  font: inherit;
+  font-size: 12px;
+}
+.log {
+  margin: 0;
+  padding-left: 28px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.log li {
+  padding: 3px 0;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
