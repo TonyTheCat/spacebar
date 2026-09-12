@@ -128,14 +128,17 @@ const out = await page.evaluate(async () => {
     here,
     answered: report !== null,
     ranAnswered: ran !== null,
-    available: report?.available,
-    where: report?.where,
-    names: (report?.tools ?? []).map((t) => t.name),
-    sources: [...new Set((report?.tools ?? []).map((t) => t.source))],
-    schemaIsObject: (report?.tools ?? []).map((t) => typeof t.inputSchema),
-    schemaProperties: (report?.tools ?? []).map((t) => Object.keys(t.inputSchema?.properties ?? {})),
-    ran: { ok: ran?.ok, text: ran?.text },
-    missing: { ok: missing?.ok, text: missing?.text },
+    /* The payload travels under ONE named key, which is what protocol.js says the envelope
+     * looks like. Read off the envelope instead, a live declaration reads as no WebMCP at all
+     * — which is how this probe and the page side first disagreed. */
+    available: report?.declared?.available,
+    where: report?.declared?.where,
+    names: (report?.declared?.tools ?? []).map((t) => t.name),
+    sources: [...new Set((report?.declared?.tools ?? []).map((t) => t.source))],
+    schemaIsObject: (report?.declared?.tools ?? []).map((t) => typeof t.inputSchema),
+    schemaProperties: (report?.declared?.tools ?? []).map((t) => Object.keys(t.inputSchema?.properties ?? {})),
+    ran: { ok: ran?.result?.ok, text: ran?.result?.text },
+    missing: { ok: missing?.result?.ok, text: missing?.result?.text },
     pageSays: document.getElementById('said').textContent,
   };
 });
