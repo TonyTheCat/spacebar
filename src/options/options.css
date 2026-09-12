@@ -7,6 +7,10 @@
   --paper: light-dark(#ffffff, #14171c);
   --good: light-dark(#1e7d3a, #4ade80);
   --bad: light-dark(#b3261e, #f87171);
+  --info: light-dark(#1d5fa8, #7cb7ff);
+  --warn-ink: light-dark(#6b4b00, #fcd34d);
+  --warn-paper: light-dark(#fff6d6, #3a2f0b);
+  --warn-line: light-dark(#e8c45a, #7a6320);
 }
 body {
   margin: 0 auto;
@@ -27,9 +31,39 @@ h2 {
 p {
   margin: 0 0 0.75rem;
 }
-.lede,
 .hint {
   color: var(--muted);
+}
+.notice {
+  display: flex;
+  gap: 0.6rem;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+}
+.notice::before {
+  flex: 0 0 auto;
+}
+.notice.warning {
+  color: var(--warn-ink);
+  background: var(--warn-paper);
+  border-color: var(--warn-line);
+}
+.notice.warning::before {
+  content: '⚠';
+}
+.key-row {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.25rem 0 0.75rem;
+}
+.key-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.key-row button {
+  flex: 0 0 auto;
+  font-weight: 500;
 }
 section {
   margin-top: 2rem;
@@ -76,6 +110,12 @@ button {
 .state {
   min-height: 1.6em;
   margin: 0.6rem 0 0;
+}
+.state.info {
+  color: var(--info);
+}
+.state.info::before {
+  content: 'ⓘ ';
 }
 .state.good {
   color: var(--good);

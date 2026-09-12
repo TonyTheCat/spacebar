@@ -27,7 +27,7 @@ const input = (id) => /** @type {HTMLInputElement} */ (el(id));
  *
  * @param {string} id       the status line
  * @param {string} text
- * @param {'good'|'bad'} [tone]
+ * @param {'info'|'good'|'bad'} [tone]
  */
 const tell = (id, text, tone) => {
   const line = el(id);
@@ -35,16 +35,23 @@ const tell = (id, text, tone) => {
   line.className = tone ? `state ${tone}` : 'state';
 };
 
-/* 1. The key. Saved, cleared from the field, and confirmed — never echoed. */
+/* 1. The key. Saved, cleared from the field, and confirmed — never echoed.
+ *
+ * "Show" only reveals what the helper is typing right now, so a mistyped
+ * character can be seen before it is saved. It does not reveal a saved key:
+ * saving clears the field, and nothing reads the key back onto this page. */
 
 void chrome.storage.local.get('openaiKey').then(({ openaiKey }) => {
   const set = typeof openaiKey === 'string' && openaiKey.length > 0;
-  tell(
-    'key-state',
-    set
-      ? 'A key is saved. Type a new one only to replace it.'
-      : 'No key yet — Spacebar stays silent until there is one.'
-  );
+  if (set) tell('key-state', 'A key is saved. Type a new one only to replace it.', 'good');
+  else tell('key-state', 'No key yet — Spacebar stays silent until there is one.', 'info');
+});
+
+el('show-key').addEventListener('click', () => {
+  const shown = input('key').type === 'text';
+  input('key').type = shown ? 'password' : 'text';
+  el('show-key').textContent = shown ? 'Show' : 'Hide';
+  el('show-key').setAttribute('aria-pressed', String(!shown));
 });
 
 el('save').addEventListener('click', () => {
@@ -55,6 +62,9 @@ el('save').addEventListener('click', () => {
   }
   void chrome.storage.local.set({ openaiKey: key }).then(() => {
     input('key').value = '';
+    input('key').type = 'password';
+    el('show-key').textContent = 'Show';
+    el('show-key').setAttribute('aria-pressed', 'false');
     tell('key-state', 'Saved. Spacebar connects by itself from now on.', 'good');
   });
 });

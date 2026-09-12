@@ -9,7 +9,7 @@
   <body>
     <header>
       <h1>Spacebar</h1>
-      <p class="lede">
+      <p class="notice warning" role="note">
         You are setting this up for somebody who will not see this page. Do it once, together,
         and from then on the browser opens, connects and talks by itself.
       </p>
@@ -21,10 +21,11 @@
         Spacebar speaks through OpenAI's realtime service, which needs a key. It stays in this
         Chrome profile and is sent nowhere except to OpenAI. It is never shown back here.
       </p>
-      <label class="field">
-        <span>OpenAI key</span>
+      <label class="field" for="key"><span>OpenAI key</span></label>
+      <div class="key-row">
         <input id="key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" />
-      </label>
+        <button id="show-key" type="button" aria-pressed="false" aria-controls="key">Show</button>
+      </div>
       <button id="save" type="button">Save the key</button>
       <p id="key-state" class="state" role="status"></p>
     </section>
