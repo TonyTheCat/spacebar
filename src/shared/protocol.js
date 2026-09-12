@@ -56,20 +56,18 @@
 /**
  * What the ISOLATED content script answers a PT.READ_REQUEST with.
  *
- * One object serves both halves of reading a page, which is why it is written down here rather
- * than left to each end: `results` is a page OF RESULTS read as a repeating block, and the rest
- * is the page in labelled parts. The phone offers the results when there are any and the shape
- * when there are not, and `Readable.results` and `Readable.shape` take exactly these fields.
+ * ALREADY SHAPED, and that is the decision this typedef exists to record. Choosing between
+ * reading a page as a list of results and reading it as prose needs the DOM in front of you —
+ * it is two or more repeating blocks or it is not — so the content script makes it, handing
+ * the hands brick our own Readable.results and Readable.shape as its two ways of saying it.
+ * The phone receives a sentence, not parts to assemble. Shaping it again at this end would be
+ * one half guessing at a decision the other half already made with the evidence.
  *
  * @typedef {object} ReadResult
- * @property {string} [title]
- * @property {string} [url]
- * @property {string[]} [headings]
- * @property {string[]} [links]
- * @property {string} [text]
- * @property {Array<{title: string, extra?: string[]}>} [results]  A page of results, in order.
- * @property {boolean} [more]      There were more than were read.
- * @property {string} [error]      Why there is nothing, in words.
+ * @property {string} text        The page, in words, ready to be said.
+ * @property {number} [results]   How many results were read, when it was a page of results.
+ * @property {number} [of]        How many the page has, when there were more than were read.
+ * @property {string} [error]     Why there is nothing, in words. NOT the same as an empty page.
  */
 
 /**

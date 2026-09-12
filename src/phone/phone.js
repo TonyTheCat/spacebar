@@ -690,10 +690,17 @@ const readThePage = async () => {
   if (!tab || tab.id === undefined) return { ok: false, text: VoiceLines.NO_PAGE.text };
   const page = await orNothing(chrome.tabs.sendMessage(tab.id, { type: PT.READ_REQUEST }), 'the read');
   if (!page) return { ok: false, text: 'That page did not answer.' };
-  const results = Readable.results(page);
+  if (page.error) return { ok: false, text: `I could not read that page: ${page.error}` };
+
+  /* The page arrives ALREADY SHAPED. The content script hands the reading to the hands brick
+   * with our own Readable.results and Readable.shape as its two ways of saying it, so the
+   * choice between "a page of results" and "a page of prose" is made where the DOM is, by the
+   * thing that can see both. Formatting it a second time here would be this half guessing at a
+   * decision the other half already made properly. */
+  const howMany = AfterTheAction.onScreen(page.results, page.of);
   // Marked as somebody else's words on the way in. A page can write a sentence aimed at the
   // model, or at the person; reported either way, obeyed neither.
-  return { ok: true, text: Readable.untrusted(results || Readable.shape(page)) };
+  return { ok: true, text: [howMany, Readable.untrusted(String(page.text ?? ''))].filter(Boolean).join(' ') };
 };
 
 /** Run one of the page's own tools, or ask about it first.
