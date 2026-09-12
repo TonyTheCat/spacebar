@@ -1,0 +1,85 @@
+/* Read once, by a sighted helper. Large type, one column, nothing to hunt for. */
+:root {
+  color-scheme: light dark;
+  --ink: light-dark(#1b1f27, #e8ecf4);
+  --muted: light-dark(#5b6472, #94a3b8);
+  --line: light-dark(#d5d9e0, #2b3340);
+  --paper: light-dark(#ffffff, #14171c);
+  --good: light-dark(#1e7d3a, #4ade80);
+  --bad: light-dark(#b3261e, #f87171);
+}
+body {
+  margin: 0 auto;
+  padding: 2.5rem 1.5rem 4rem;
+  max-width: 40rem;
+  font: 17px/1.6 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: var(--ink);
+  background: var(--paper);
+}
+h1 {
+  font-size: 1.75rem;
+  margin: 0 0 0.25rem;
+}
+h2 {
+  font-size: 1.1rem;
+  margin: 0 0 0.25rem;
+}
+p {
+  margin: 0 0 0.75rem;
+}
+.lede,
+.hint {
+  color: var(--muted);
+}
+section {
+  margin-top: 2rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
+}
+footer {
+  margin-top: 2.5rem;
+}
+.field {
+  display: block;
+  margin: 0.75rem 0;
+}
+.field span {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+}
+input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0.6rem;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+input:focus-visible {
+  outline: 2px solid var(--good);
+  outline-offset: 1px;
+}
+button {
+  font: inherit;
+  font-weight: 600;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.state {
+  min-height: 1.6em;
+  margin: 0.6rem 0 0;
+}
+.state.good {
+  color: var(--good);
+}
+.state.bad {
+  color: var(--bad);
+}

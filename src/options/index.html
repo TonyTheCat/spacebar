@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Spacebar — set up once</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Spacebar</h1>
+      <p class="lede">
+        You are setting this up for somebody who will not see this page. Do it once, together,
+        and from then on the browser opens, connects and talks by itself.
+      </p>
+    </header>
+
+    <section aria-labelledby="key-title">
+      <h2 id="key-title">1. The OpenAI key</h2>
+      <p>
+        Spacebar speaks through OpenAI's realtime service, which needs a key. It stays in this
+        Chrome profile and is sent nowhere except to OpenAI. It is never shown back here.
+      </p>
+      <label class="field">
+        <span>OpenAI key</span>
+        <input id="key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" />
+      </label>
+      <button id="save" type="button">Save the key</button>
+      <p id="key-state" class="state" role="status"></p>
+    </section>
+
+    <section aria-labelledby="mic-title">
+      <h2 id="mic-title">2. The microphone</h2>
+      <p>
+        Chrome asks for the microphone once, in a dialog. Answer it now, while you can see it —
+        otherwise the first thing they say goes into a box they cannot find.
+      </p>
+      <button id="mic" type="button">Check the microphone</button>
+      <p id="mic-state" class="state" role="status"></p>
+    </section>
+
+    <section aria-labelledby="start-title">
+      <h2 id="start-title">3. Where the browser opens</h2>
+      <p>
+        Chrome's own new-tab page is empty for a voice: nothing runs there, so the space bar does
+        nothing. Spacebar opens a real site instead. Leave this empty for Google, or name a site
+        the way you would say it out loud — the same words work when they say "open …".
+      </p>
+      <label class="field">
+        <span>Start page</span>
+        <input id="start" type="text" autocomplete="off" spellcheck="false" placeholder="google" />
+      </label>
+      <button id="save-start" type="button">Save the start page</button>
+      <p id="start-state" class="state" role="status"></p>
+    </section>
+
+    <section aria-labelledby="language-title">
+      <h2 id="language-title">4. The language they speak</h2>
+      <p>
+        Pick the language the person actually speaks. Left to guess, transcription can hear
+        English as something else, and the errand goes the wrong way with nothing to say why.
+        English if you leave it alone.
+      </p>
+      <label class="field">
+        <span>Spoken language</span>
+        <input
+          id="language"
+          type="text"
+          list="languages"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="en"
+        />
+      </label>
+      <datalist id="languages"></datalist>
+      <button id="save-language" type="button">Save the language</button>
+      <p id="language-state" class="state" role="status"></p>
+    </section>
+
+    <footer>
+      <p class="hint">
+        Done? Close this tab. Next time Chrome starts, a pinned tab opens on its own and says
+        where it is.
+      </p>
+    </footer>
+
+    <script src="../shared/known-sites.js"></script>
+    <script src="../shared/spoken-language.js"></script>
+    <script src="options.js"></script>
+  </body>
+</html>
