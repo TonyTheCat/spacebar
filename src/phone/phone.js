@@ -752,20 +752,41 @@ const openTheStartPageIfNothingElseDid = async () => {
  *  @param {string} why @returns {Promise<object|null>} the scan */
 const readThePageAndPublish = async (why) => {
   const tab = await findPageTab();
+
+  /* OUR OWN TOOLS GO OUT EVEN WHEN THE PAGE CANNOT BE READ, and this is the most important
+   * line in the function.
+   *
+   * From a live run: the browser came back with restored tabs, none of them blank. A tab that
+   * existed BEFORE the extension loaded has no content script in it — Chrome does not inject
+   * into tabs already open — so the scan went unanswered, nothing was published, and the
+   * session was handed a list of no tools at all. The model, with no way to do anything and no
+   * way to say why, announced that it had searched for pizza and was looking at the results.
+   * That is a lie told to somebody who cannot check it, and it starts here: a model holding
+   * nothing will narrate rather than refuse.
+   *
+   * open_site always works — it is ours, it needs no content script — so it always goes out.
+   * A person who cannot read this page can still be taken somewhere that reads. */
   if (!tab || tab.id === undefined) {
-    log('there is no page open to read');
+    log('there is no page open to read — publishing our own tools so there is still a way out');
+    await handToTheSession([...OUR_TOOLS], `${why}, with no page`);
     return null;
   }
   pageTabId = tab.id;
   const scan = await askUntilItAnswers(tab.id, { type: PT.SCAN_REQUEST }, 'the scan');
   if (!scan || typeof scan !== 'object') {
-    // Could not look. NOT "the page has none" — said apart, the agent reports it lost the page;
-    // run together it tells somebody who cannot see that the thing they asked for is not there.
-    log('the page did not answer a scan');
+    /* Could not look. NOT "the page has none" — said apart, the agent reports it lost the page;
+     * run together it tells somebody who cannot see that the thing they asked for is not
+     * there. The commonest cause is a tab older than the extension, and the way out of that is
+     * to go somewhere else, which is exactly what open_site is for. */
+    log('the page did not answer a scan — publishing our own tools so there is still a way out');
+    schemasInPlay.clear();
+    await handToTheSession([...OUR_TOOLS], `${why}, unreadable page`);
     return null;
   }
   if (scan.readable === false) {
     log(`could not read that page: ${scan.error ?? 'no reason given'}`);
+    schemasInPlay.clear();
+    await handToTheSession([...OUR_TOOLS], `${why}, unreadable page`);
     return scan;
   }
   await handToTheSession(toolsOf(scan), why);
