@@ -116,6 +116,47 @@ The pinned tab shows the same in writing: a state line (*not connected*, *connec
 to talk*, *reconnecting…*) and a log of what happened. If something goes wrong, that log is
 where to look.
 
+## In a workspace behind a login — Ambiguous
+
+Everything above is on public pages. The same key works on a site somebody actually works in
+every day, behind a login, that was never built for this — the demo's second site is an
+[Ambiguous](https://app.ambiguous.ai) workspace: mail, tasks, documents, one account.
+
+1. **Be on the Docs page** of a workspace you are signed in to — the list of documents, with a
+   row of templates above it.
+2. **Hold the space bar and say:** *"Start a new document."* Let go.
+3. **It asks, naming the button it is about to press:** *"Fill in and submit "Start a new
+   document" (2 fields). Commits with the "Create from Blank template" button — shall I?"*
+4. **Say yes.** A document appears in the list. Say no, and nothing does.
+
+There is no title field on that page — the tool it read off the markup groups the list's own
+filters with the create button — so *"create a document called X"* goes nowhere. Start the
+document, then name it, as a second turn.
+
+**Read it back through the workspace's own door.** Ambiguous offers agents an MCP endpoint
+(`app.ambiguous.ai/mcp`, with an API key from its *MCP* page). `workspace-readback.mjs` in the
+`verify-tools` repository asks that endpoint, read-only, whether a document exists now that
+did not before the yes — the workspace's own record, by id, not a picture of a list. Start it
+before you speak; it prints the answer when the document lands:
+
+```sh
+AMBIGUOUS_API_KEY=ak_… node workspace-readback.mjs watch
+# 3 document(s) visible to Elena Galka — waiting up to 120s for one more.
+# PASS  the workspace's own API lists the document the gate created — "Project Brief"
+#       f1b94fc9-…, created 2026-09-12T17:39:57Z by Elena Galka
+#       https://app.ambiguous.ai/docs/f1b94fc9-…
+```
+
+The key must belong to the account the page is signed in as: a document is private to whoever
+created it, and a read-back through another member's key reports nothing about a document that
+is on the screen. `whoami` prints who a key is.
+
+**What that workspace declares, measured.** It has an *MCP* entry in its own side menu, and
+on five of its surfaces `document.modelContext` is present — Chrome provides it — and
+`getTools()` returns zero. Nothing is wrong with the product; it is where the web is today, and
+it is why the twenty-five tools Spacebar has there, the button above included, are read off the
+markup rather than declared.
+
 ## Working on this repository
 
 Nothing is installed. There is no build step and no dependency — the folder is what Chrome
