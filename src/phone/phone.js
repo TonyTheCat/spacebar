@@ -744,10 +744,30 @@ const OUR_TOOLS = [
   },
 ];
 
+/** Forget the page's schemas, and remember our own.
+ *
+ * OUR four tools are on offer on every page, and their schemas are ours: we wrote them right
+ * here, with ordinary named arguments and no secrets in any of them. Leaving them out of this
+ * map is what made the gate's masking rule — an argument the schema does not describe is never
+ * spoken — hide one of them.
+ *
+ * Measured on a live run: `the model called open_site with {"site":"(hidden)"}`. The rule is
+ * right and it stays; what was wrong is that this map only ever held the PAGE's tools, so a
+ * tool whose schema we authored looked exactly like a tool whose schema we had lost. The
+ * model was then handed back its own call with the destination blanked out, and could not
+ * tell the person where it had just taken them.
+ *
+ * One function for all three call sites, so a clear can never again leave our own tools
+ * undescribed. */
+const forgetThePageSchemas = () => {
+  schemasInPlay.clear();
+  for (const tool of OUR_TOOLS) schemasInPlay.set(tool.name, tool.parameters);
+};
+
 /** Everything on offer right now, in the order the model reads it. @param {object} scan */
 const toolsOf = (scan) => {
   const page = Shortlist.pick(scan?.synthesized ?? []);
-  schemasInPlay.clear();
+  forgetThePageSchemas();
   for (const tool of page) schemasInPlay.set(tool.name, tool.inputSchema);
   return [...page.map(asFunctionTool), ...OUR_TOOLS];
 };
@@ -845,13 +865,13 @@ const readThePageAndPublish = async (why) => {
      * there. The commonest cause is a tab older than the extension, and the way out of that is
      * to go somewhere else, which is exactly what open_site is for. */
     log('the page did not answer a scan — publishing our own tools so there is still a way out');
-    schemasInPlay.clear();
+    forgetThePageSchemas();
     await handToTheSession([...OUR_TOOLS], `${why}, unreadable page`);
     return null;
   }
   if (scan.readable === false) {
     log(`could not read that page: ${scan.error ?? 'no reason given'}`);
-    schemasInPlay.clear();
+    forgetThePageSchemas();
     await handToTheSession([...OUR_TOOLS], `${why}, unreadable page`);
     return scan;
   }
